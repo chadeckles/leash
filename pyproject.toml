@@ -1,0 +1,55 @@
+[project]
+name = "leash"
+version = "0.2.0"
+description = "Leash – AI Agent Identity, Authorization, and Audit Layer"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.11"
+authors = [
+    { name = "Chad Eckles" },
+]
+keywords = [
+    "ai", "agents", "authorization", "audit", "security", "mcp",
+    "langchain", "crewai", "policy", "openclaw", "guardrails",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "sqlalchemy>=2.0.0",
+    "pyjwt>=2.8.0",
+    "cryptography>=41.0.0",
+    "pyyaml>=6.0.1",
+    "pydantic>=2.5.0",
+    "httpx>=0.25.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/chadeckles/leash"
+Repository = "https://github.com/chadeckles/leash"
+Documentation = "https://github.com/chadeckles/leash#readme"
+Issues = "https://github.com/chadeckles/leash/issues"
+Changelog = "https://github.com/chadeckles/leash/blob/main/CHANGELOG.md"
+
+[project.scripts]
+leash = "sdk.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["app*", "sdk*"]

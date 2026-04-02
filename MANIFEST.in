@@ -1,0 +1,22 @@
+# Only include what's needed for the source distribution
+include LICENSE
+include README.md
+include pyproject.toml
+include requirements.txt
+recursive-include app *.py *.yaml *.html *.png
+recursive-include sdk *.py
+recursive-include assets *.png *.svg *.ico
+
+# Exclude everything else
+prune tests
+prune docs
+prune scripts
+prune .github
+exclude STRATEGY.md
+exclude SECURITY.md
+exclude CONTRIBUTING.md
+exclude CHANGELOG.md
+exclude Makefile
+exclude Dockerfile
+exclude docker-compose.yml
+exclude leash

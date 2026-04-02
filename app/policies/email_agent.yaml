@@ -1,0 +1,19 @@
+# Email agent policy – demonstrates wildcard action matching
+#
+# Rules are evaluated top-to-bottom.  The first match wins.
+# "email.read" is explicitly allowed; "email.*" catches everything
+# else (send, delete, forward, etc.) and denies it.
+name: email-agent
+description: Read-only email access with wildcard deny
+priority: 10
+agents:
+  - "*email*"  # Matches any agent with 'email' in its name
+
+rules:
+  - action: "email.read"
+    effect: allow
+    reason: "Agent is permitted to read emails"
+
+  - action: "email.*"
+    effect: deny
+    reason: "All other email actions are denied"

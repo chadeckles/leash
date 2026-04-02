@@ -1,0 +1,40 @@
+site_name: Leash
+site_description: Rules for AI agents. Know what they did. Stop what they shouldn't.
+site_url: https://leash.dev
+
+repo_url: https://github.com/chadeckles/leash
+repo_name: leash
+
+theme:
+  name: material
+  palette:
+    - scheme: slate
+      primary: teal
+      accent: cyan
+  features:
+    - navigation.sections
+    - navigation.expand
+    - content.code.copy
+    - toc.integrate
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Write Your First Policy: write-your-first-policy.md
+  - OpenClaw Integration: openclaw-guide.md
+  - MCP Proxy Guide: mcp-proxy-guide.md
+  - SDK Reference: sdk-reference.md
+  - CLI Reference: cli-reference.md
+  - Architecture: architecture.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - attr_list
+  - def_list
+  - toc:
+      permalink: true

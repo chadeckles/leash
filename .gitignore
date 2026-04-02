@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Environment
+.venv/
+venv/
+env/
+.env
+
+# Leash runtime (generated on first boot)
+*.db
+.keys/
+.leash_identity.json
+
+# CLI token cache
+.leash/
+
+# Test / IDE
+.pytest_cache/
+test-results/
+.coverage
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Docs build output
+site/
+docs/site/
+*.db-shm
+*.db-wal

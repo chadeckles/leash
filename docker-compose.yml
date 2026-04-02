@@ -1,0 +1,37 @@
+version: "3.9"
+
+services:
+  leash:
+    build: .
+    container_name: leash-server
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./app/policies:/app/app/policies:ro
+      - leash-data:/app/data
+      - leash-keys:/app/.keys
+    environment:
+      # ── Core ──
+      - DATABASE_URL=sqlite:////app/data/leash.db
+      - KEYS_DIR=/app/.keys
+      - POLICIES_DIR=/app/app/policies
+      # ── Security hardening (all recommended for production) ──
+      - LEASH_REQUIRE_AUTH_REGISTER=true
+      - LEASH_REQUIRE_AUTH_READ=true
+      - LEASH_POLICY_REQUIRE_ADMIN=true
+      - JWT_EXPIRATION_HOURS=168
+      - LEASH_CORS_ORIGINS=http://localhost:8000,http://127.0.0.1:8000
+      # ── Audit export (optional) ──
+      # - LEASH_WEBHOOK_URL=https://your-siem.example.com/ingest
+      # - LEASH_AUDIT_SINK=/app/data/audit.jsonl
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  leash-data:
+  leash-keys:

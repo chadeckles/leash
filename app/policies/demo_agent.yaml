@@ -1,0 +1,25 @@
+# Demo-specific policy – shows how to add agent-specific rules
+name: demo_agent_policy
+description: Policy for the demo agent script.
+priority: 10
+agents:
+  - "*demo*"  # Matches any agent with 'demo' in its name
+
+rules:
+  - action: "read_file"
+    resource: "*"
+    effect: allow
+    reason: "Demo agent may read files"
+
+  - action: "summarize"
+    effect: allow
+    reason: "Demo agent may summarize content"
+
+  - action: "write_file"
+    resource: "*"
+    effect: allow
+    reason: "Demo agent may write output files"
+
+  - action: "delete_file"
+    effect: deny
+    reason: "Demo agent is not allowed to delete files"

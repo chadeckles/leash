@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Leash Dashboard</title>
+<link rel="icon" href="/assets/leash_icon.png">
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #232733;
+    --border: #2d3143;
+    --text: #e1e4ed;
+    --text-dim: #8b90a0;
+    --accent: #6c9eff;
+    --green: #4ade80;
+    --red: #f87171;
+    --yellow: #fbbf24;
+    --cyan: #22d3ee;
+    --purple: #a78bfa;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  /* Header */
+  .header {
+    background: linear-gradient(135deg, #1e2235 0%, #171926 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .header h1 {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--cyan);
+    letter-spacing: 2px;
+  }
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 6px;
+  }
+  .status-dot.ok { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .status-dot.err { background: var(--red); box-shadow: 0 0 8px var(--red); }
+  .uptime { color: var(--text-dim); font-size: 12px; }
+
+  /* Grid */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+    gap: 16px;
+    padding: 20px 24px;
+    max-width: 1600px;
+    margin: 0 auto;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    transition: border-color 0.2s;
+  }
+  .card:hover { border-color: var(--accent); }
+  .card-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .card-title .icon { font-size: 14px; }
+
+  /* Big numbers */
+  .big-nums {
+    display: flex;
+    justify-content: space-evenly;
+    flex-wrap: wrap;
+    padding: 20px 0 10px;
+  }
+  .big-num {
+    text-align: center;
+    flex: 1;
+    min-width: 80px;
+  }
+  .big-num .value {
+    font-size: 52px;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -1px;
+  }
+  .big-num .label {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-top: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .big-num .rate {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 2px;
+  }
+  .green { color: var(--green); }
+  .red { color: var(--red); }
+  .yellow { color: var(--yellow); }
+  .cyan { color: var(--cyan); }
+  .purple { color: var(--purple); }
+  .accent { color: var(--accent); }
+
+  /* Progress bar */
+  .bar-container {
+    height: 8px;
+    background: var(--surface2);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 12px;
+    display: flex;
+  }
+  .bar-allow {
+    background: var(--green);
+    transition: width 0.5s ease;
+  }
+  .bar-deny {
+    background: var(--red);
+    transition: width 0.5s ease;
+  }
+  .bar-label {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 6px;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  /* Tables */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  th {
+    text-align: left;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  td {
+    padding: 6px 8px;
+    border-bottom: 1px solid #1e2133;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 200px;
+  }
+  tr:hover td { background: var(--surface2); }
+
+  /* Tags/badges */
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+  }
+  .badge-allow { background: rgba(74, 222, 128, 0.15); color: var(--green); }
+  .badge-deny { background: rgba(248, 113, 113, 0.15); color: var(--red); }
+  .badge-vendor { background: rgba(108, 158, 255, 0.15); color: var(--accent); }
+
+  /* Security scan findings */
+  .alert {
+    background: rgba(251, 191, 36, 0.08);
+    border: 1px solid rgba(251, 191, 36, 0.25);
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+    font-size: 12px;
+    color: var(--yellow);
+  }
+  .alert.alert-critical {
+    background: rgba(248, 113, 113, 0.1);
+    border-color: rgba(248, 113, 113, 0.35);
+    color: var(--red);
+  }
+  .alert.alert-high {
+    background: rgba(251, 146, 60, 0.08);
+    border-color: rgba(251, 146, 60, 0.25);
+    color: #fb923c;
+  }
+  .alert.alert-clean {
+    background: rgba(74, 222, 128, 0.08);
+    border-color: rgba(74, 222, 128, 0.2);
+    color: var(--green);
+  }
+  .alert .chain-name { font-weight: 700; }
+  .scan-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 12px;
+  }
+  .scan-check .check-icon { font-size: 13px; }
+  .scan-check .check-title { color: var(--text); }
+  .scan-check .check-summary { color: var(--text-dim); font-size: 11px; }
+  .severity-pills {
+    display: flex;
+    gap: 8px;
+    margin: 10px 0;
+    font-size: 11px;
+  }
+  .severity-pills .pill {
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-weight: 600;
+  }
+  .pill-critical { background: rgba(248, 113, 113, 0.15); color: var(--red); }
+  .pill-high { background: rgba(251, 146, 60, 0.12); color: #fb923c; }
+  .pill-medium { background: rgba(251, 191, 36, 0.12); color: var(--yellow); }
+  .pill-low { background: rgba(108, 158, 255, 0.12); color: var(--accent); }
+  .pill-info { background: rgba(139, 144, 160, 0.12); color: var(--text-dim); }
+  .severity-pills .pill {
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s;
+    user-select: none;
+  }
+  .severity-pills .pill:hover {
+    transform: scale(1.08);
+    box-shadow: 0 0 8px rgba(255,255,255,0.08);
+  }
+  .severity-pills .pill.active {
+    outline: 2px solid currentColor;
+    outline-offset: 1px;
+    transform: scale(1.08);
+  }
+  .findings-toggle {
+    color: var(--accent);
+    font-size: 11px;
+    cursor: pointer;
+    padding: 6px 0 2px;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .findings-toggle:hover { text-decoration: underline; }
+  .findings-toggle .arrow {
+    display: inline-block;
+    transition: transform 0.2s;
+    font-size: 10px;
+  }
+  .findings-toggle .arrow.open { transform: rotate(180deg); }
+
+
+
+  /* Audit feed */
+  .feed-entry {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 0;
+    border-bottom: 1px solid #1e2133;
+    font-size: 12px;
+  }
+  .feed-icon { font-size: 14px; }
+  .feed-time { color: var(--text-dim); min-width: 65px; font-size: 11px; }
+  .feed-agent { color: var(--purple); min-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .feed-action { color: var(--text); }
+
+  /* Empty state */
+  .empty { color: var(--text-dim); font-style: italic; padding: 20px 0; text-align: center; }
+
+  /* Responsive */
+  @media (max-width: 800px) {
+    .grid { grid-template-columns: 1fr; padding: 12px; }
+    .header { padding: 12px 16px; }
+    .big-nums { gap: 12px; }
+    .big-num .value { font-size: 24px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1 style="display:flex;align-items:center;gap:10px">
+    <img src="/assets/leash_icon.png" alt="Leash" style="height:36px;width:36px;border-radius:50%;object-fit:cover">
+    LEASH
+  </h1>
+  <div class="header-right">
+    <span id="health"><span class="status-dot err"></span> connecting...</span>
+    <span class="uptime" id="uptime"></span>
+    <span class="uptime" id="clock"></span>
+  </div>
+</div>
+
+<div class="grid">
+
+  <!-- Server stats -->
+  <div class="card">
+    <div class="card-title"><span class="icon">📊</span> Server Metrics</div>
+    <div class="big-nums">
+      <div class="big-num">
+        <div class="value cyan" id="agentCount">—</div>
+        <div class="label">Agents</div>
+      </div>
+      <div class="big-num">
+        <div class="value purple" id="auditCount">—</div>
+        <div class="label">Audit Entries</div>
+      </div>
+      <div class="big-num">
+        <div class="value accent" id="decisionsTotal">—</div>
+        <div class="label">Decisions</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Security Scan -->
+  <div class="card">
+    <div class="card-title"><span class="icon">🛡️</span> Security Scan <span id="scanStatus" style="color:var(--text-dim)"></span></div>
+    <div id="scanContent"><div class="empty">Loading...</div></div>
+  </div>
+
+  <!-- Agents -->
+  <div class="card">
+    <div class="card-title"><span class="icon">🤖</span> Agents <span id="agentTotal" style="color:var(--text-dim)"></span></div>
+    <div id="agentsTable"><div class="empty">Loading agents...</div></div>
+  </div>
+
+  <!-- Per-action breakdown -->
+  <div class="card">
+    <div class="card-title"><span class="icon">📋</span> Actions Breakdown</div>
+    <div id="actionsTable"><div class="empty">Loading...</div></div>
+  </div>
+
+  <!-- Recent audit activity -->
+  <div class="card">
+    <div class="card-title"><span class="icon">🕐</span> Recent Activity</div>
+    <div id="auditFeed"><div class="empty">Loading activity...</div></div>
+  </div>
+
+  <!-- Active Policies -->
+  <div class="card">
+    <div class="card-title"><span class="icon">📜</span> Active Policies <span id="policyTotal" style="color:var(--text-dim)"></span></div>
+    <div id="policiesTable"><div class="empty">Loading...</div></div>
+  </div>
+
+</div>
+
+<script>
+let agentNames = {};  // agent_id → name lookup
+
+function agentLabel(id) {
+  if (!id) return '—';
+  return agentNames[id] || id.slice(0, 12);
+}
+
+function jsonHeaders() {
+  return { 'Content-Type': 'application/json' };
+}
+
+function timeAgo(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  const s = (Date.now() - d.getTime()) / 1000;
+  if (s < 0) return 'just now';
+  if (s < 60) return Math.floor(s) + 's ago';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  return Math.floor(s / 86400) + 'd ago';
+}
+
+function fmtUptime(s) {
+  if (s < 60) return Math.floor(s) + 's';
+  if (s < 3600) return Math.floor(s / 60) + 'm ' + Math.floor(s % 60) + 's';
+  return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
+}
+
+function fmtNum(n) {
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+  return String(n);
+}
+
+// ── Metrics ──
+async function fetchMetrics() {
+  try {
+    const r = await fetch('/metrics');
+    if (!r.ok) return;
+    const text = await r.text();
+    const m = parseMetrics(text);
+
+    // Health + uptime
+    document.getElementById('health').innerHTML =
+      '<span class="status-dot ok"></span> healthy';
+    document.getElementById('uptime').textContent = '⏱ ' + fmtUptime(m.uptime);
+
+    // Decisions total (allow + deny)
+    document.getElementById('decisionsTotal').textContent = fmtNum(m.allow + m.deny);
+
+  } catch (e) {
+    document.getElementById('health').innerHTML =
+      '<span class="status-dot err"></span> unreachable';
+  }
+}
+
+function parseMetrics(text) {
+  const m = { allow: 0, deny: 0, agents: 0, audit: 0, uptime: 0 };
+
+  for (const line of text.split('\n')) {
+    const l = line.trim();
+    if (!l || l.startsWith('#')) continue;
+
+    let match;
+    if ((match = l.match(/leash_authorize_total\{decision="(\w+)"\}\s+([\d.]+)/))) {
+      if (match[1] === 'allow') m.allow = parseInt(match[2]);
+      else if (match[1] === 'deny') m.deny = parseInt(match[2]);
+    } else if ((match = l.match(/leash_agents_registered_total\s+([\d.]+)/))) {
+      m.agents = parseInt(match[1]);
+    } else if ((match = l.match(/leash_audit_entries_total\s+([\d.]+)/))) {
+      m.audit = parseInt(match[1]);
+    } else if ((match = l.match(/leash_uptime_seconds\s+([\d.]+)/))) {
+      m.uptime = parseFloat(match[1]);
+    }
+  }
+
+  return m;
+}
+
+// ── Agents ──
+async function fetchAgents() {
+  try {
+    const r = await fetch('/agents?limit=20');
+    if (!r.ok) return;
+    const data = await r.json();
+    const agents = data.agents || [];
+    // Build name lookup for use in chains + feed
+    for (const a of agents) {
+      if (a.agent_id && a.name) agentNames[a.agent_id] = a.name;
+    }
+    document.getElementById('agentTotal').textContent = `(${data.total || agents.length})`;
+    // Override Server Metrics count with real DB total (Prometheus counter resets on restart)
+    document.getElementById('agentCount').textContent = fmtNum(data.total || agents.length);
+
+    if (!agents.length) {
+      document.getElementById('agentsTable').innerHTML = '<div class="empty">No agents registered</div>';
+      return;
+    }
+    let html = '<table><tr><th>Name</th><th>Type</th><th>Created</th><th>Last Active</th></tr>';
+    for (const a of agents) {
+      const atype = a.agent_type || '—';
+      html += `<tr>
+        <td style="color:var(--text)">${esc(a.name || '—')}</td>
+        <td>${atype !== '—' ? '<span class="badge badge-vendor">' + esc(atype) + '</span>' : '—'}</td>
+        <td style="color:var(--text-dim)">${timeAgo(a.created_at)}</td>
+        <td style="color:${a.last_seen_at ? 'var(--green)' : 'var(--text-dim)'}">${a.last_seen_at ? timeAgo(a.last_seen_at) : 'never'}</td>
+      </tr>`;
+    }
+    html += '</table>';
+    document.getElementById('agentsTable').innerHTML = html;
+  } catch (e) {}
+}
+
+// ── Audit summary ──
+async function fetchAuditSummary() {
+  try {
+    const r = await fetch('/audit/summary');
+    if (!r.ok) return;
+    const data = await r.json();
+    const actions = data.actions || [];
+    // Override Server Metrics count with real DB total
+    document.getElementById('auditCount').textContent = fmtNum(data.total_entries || 0);
+
+    if (!actions.length) {
+      document.getElementById('actionsTable').innerHTML = '<div class="empty" style="color:var(--text-dim);font-size:11px;line-height:1.6">No authorize calls yet.<br>Actions populate here as agents make requests.</div>';
+      return;
+    }
+
+    const sorted = actions.sort((a, b) => b.count - a.count).slice(0, 10);
+    let html = '<table><tr><th>Action</th><th>Total</th><th>Allow</th><th>Deny</th><th>Ratio</th></tr>';
+    for (const a of sorted) {
+      const pct = a.count > 0 ? (a.denied / a.count * 100).toFixed(0) : 0;
+      const barW = a.count > 0 ? (a.allowed / a.count * 100) : 100;
+      html += `<tr>
+        <td style="color:var(--text)">${esc(a.action)}</td>
+        <td>${a.count}</td>
+        <td class="green">${a.allowed}</td>
+        <td class="red">${a.denied}</td>
+        <td style="width:120px">
+          <div class="bar-container" style="height:4px; margin:0">
+            <div class="bar-allow" style="width:${barW}%"></div>
+            <div class="bar-deny" style="width:${100 - barW}%"></div>
+          </div>
+        </td>
+      </tr>`;
+    }
+    html += '</table>';
+    document.getElementById('actionsTable').innerHTML = html;
+  } catch (e) {}
+}
+
+// ── Security Scan ──
+async function fetchScan() {
+  try {
+    const r = await fetch('/audit/scan', {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ limit: 500, window: 3600 }),
+    });
+    if (!r.ok) return;
+    const data = await r.json();
+    const el = document.getElementById('scanContent');
+    const statusEl = document.getElementById('scanStatus');
+
+    const totalFindings = data.total_findings || 0;
+
+    // Status badge
+    if (data.status === 'clean') {
+      statusEl.textContent = '✔ clean';
+      statusEl.style.color = 'var(--green)';
+    } else if (data.status === 'critical') {
+      statusEl.textContent = '✘ critical';
+      statusEl.style.color = 'var(--red)';
+    } else {
+      statusEl.textContent = `⚠ ${totalFindings} finding${totalFindings !== 1 ? 's' : ''}`;
+      statusEl.style.color = 'var(--yellow)';
+    }
+
+    // Severity pills (only show non-zero)
+    let pills = '';
+    const sevs = [
+      ['critical', data.critical_count, 'pill-critical'],
+      ['high', data.high_count, 'pill-high'],
+      ['medium', data.medium_count, 'pill-medium'],
+      ['low', data.low_count, 'pill-low'],
+    ];
+    const activePills = sevs.filter(s => s[1] > 0);
+    if (activePills.length) {
+      pills = '<div class="severity-pills">' +
+        activePills.map(s => `<span class="pill ${s[2]}" data-severity="${s[0]}" title="Click to filter ${s[0]} findings">${s[1]} ${s[0]}</span>`).join('') +
+        '</div>';
+    }
+
+    // Per-check results
+    const checks = data.checks || [];
+    let checksHtml = '';
+    for (const c of checks) {
+      const icon = c.status === 'pass' ? '✔' : c.status === 'fail' ? '✘' : '⚠';
+      const color = c.status === 'pass' ? 'var(--green)' : c.status === 'fail' ? 'var(--red)' : 'var(--yellow)';
+      checksHtml += `<div class="scan-check">
+        <span class="check-icon" style="color:${color}">${icon}</span>
+        <span class="check-title">${esc(c.title)}</span>
+        <span class="check-summary">— ${esc(c.summary)}</span>
+      </div>`;
+    }
+
+    // Findings — all of them, stored globally for filter/expand
+    const allFindings = [];
+    for (const c of checks) {
+      for (const f of (c.findings || [])) allFindings.push(f);
+    }
+    const sevOrder = {critical: 0, high: 1, medium: 2, low: 3, info: 4};
+    allFindings.sort((a, b) => (sevOrder[a.severity] || 9) - (sevOrder[b.severity] || 9));
+
+    // Store for interactive filter/expand — preserve user state across refreshes
+    window._scanFindings = allFindings;
+    if (window._scanExpanded === undefined) window._scanExpanded = false;
+    if (window._scanFilter === undefined) window._scanFilter = null;
+
+    if (totalFindings === 0) {
+      el.innerHTML = checksHtml +
+        '<div class="alert alert-clean" style="margin-top:10px">✔ All checks passed — no security findings</div>';
+    } else {
+      el.innerHTML = pills + checksHtml + '<div id="findingsContainer" style="margin-top:10px"></div>';
+      renderFindings();
+      // Wire up clickable severity pills + restore active state
+      el.querySelectorAll('.severity-pills .pill').forEach(pill => {
+        if (pill.dataset.severity === window._scanFilter) pill.classList.add('active');
+        pill.addEventListener('click', () => {
+          const sev = pill.dataset.severity;
+          if (window._scanFilter === sev) {
+            window._scanFilter = null;
+            pill.classList.remove('active');
+          } else {
+            el.querySelectorAll('.severity-pills .pill').forEach(p => p.classList.remove('active'));
+            window._scanFilter = sev;
+            pill.classList.add('active');
+          }
+          window._scanExpanded = true; // auto-expand when filtering
+          renderFindings();
+        });
+      });
+    }
+  } catch (e) {}
+}
+
+function renderFindings() {
+  const container = document.getElementById('findingsContainer');
+  if (!container) return;
+  const allFindings = window._scanFindings || [];
+  const filter = window._scanFilter;
+  const expanded = window._scanExpanded;
+  const sevIcons = {critical: '🔴', high: '🟠', medium: '🟡', low: '🔵', info: '⚪'};
+
+  let visible = filter ? allFindings.filter(f => f.severity === filter) : allFindings;
+  const PREVIEW = 5;
+  const showing = expanded ? visible : visible.slice(0, PREVIEW);
+  const remaining = visible.length - showing.length;
+
+  let html = showing.map(f => {
+    const alertClass = f.severity === 'critical' ? 'alert-critical' : f.severity === 'high' ? 'alert-high' : '';
+    const agent = f.agent_id ? ` <span style="color:var(--purple)">${esc(agentLabel(f.agent_id))}</span>` : '';
+    const detail = f.detail ? `<div style="color:var(--text-dim);font-size:11px;margin-top:2px">${esc(f.detail)}</div>` : '';
+    return `<div class="alert ${alertClass}" style="padding:8px 12px">
+      <span>${sevIcons[f.severity] || '?'}</span>
+      <strong>${esc(f.title)}</strong>${agent}
+      ${detail}
+    </div>`;
+  }).join('');
+
+  // Toggle button
+  if (visible.length > PREVIEW) {
+    if (expanded) {
+      html += `<div class="findings-toggle" onclick="window._scanExpanded=false;renderFindings()">
+        <span class="arrow open">▼</span> Show less
+      </div>`;
+    } else {
+      html += `<div class="findings-toggle" onclick="window._scanExpanded=true;renderFindings()">
+        <span class="arrow">▼</span> Show all ${visible.length} findings (${remaining} more)
+      </div>`;
+    }
+  }
+
+  // Filter label
+  if (filter) {
+    html += `<div style="font-size:10px;color:var(--text-dim);margin-top:6px">
+      Filtered: ${filter} only · <span style="color:var(--accent);cursor:pointer" onclick="window._scanFilter=null;document.querySelectorAll('.pill').forEach(p=>p.classList.remove('active'));renderFindings()">clear filter</span>
+    </div>`;
+  }
+
+  container.innerHTML = html;
+}
+
+// ── Audit feed ──
+async function fetchAuditFeed() {
+  try {
+    const r = await fetch('/audit?limit=12');
+    if (!r.ok) return;
+    const data = await r.json();
+    const entries = data.entries || [];
+    const el = document.getElementById('auditFeed');
+
+    if (!entries.length) {
+      el.innerHTML = '<div class="empty" style="color:var(--text-dim);font-size:11px;line-height:1.6">No activity yet.<br>Authorize calls appear here in real time.</div>';
+      return;
+    }
+    el.innerHTML = entries.map(e => {
+      const icon = e.policy_decision === 'allow'
+        ? '<span class="feed-icon green">✔</span>'
+        : '<span class="feed-icon red">✘</span>';
+      return `<div class="feed-entry">
+        ${icon}
+        <span class="feed-time">${timeAgo(e.timestamp)}</span>
+        <span class="feed-agent">${esc(agentLabel(e.agent_id))}</span>
+        <span class="feed-action">${esc(e.action || '?')}</span>
+      </div>`;
+    }).join('');
+  } catch (e) {}
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+function updateClock() {
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString();
+}
+
+// ── Policies ──
+async function fetchPolicies() {
+  try {
+    const r = await fetch('/policies/overview');
+    if (!r.ok) return;
+    const data = await r.json();
+    const policies = data.policies || [];
+    const el = document.getElementById('policiesTable');
+    document.getElementById('policyTotal').textContent = `(${policies.length})`;
+
+    if (!policies.length) {
+      el.innerHTML = '<div class="empty">No policies loaded</div>';
+      return;
+    }
+
+    let html = '<table><tr><th>Name</th><th>Priority</th><th>Targets</th><th>Rules</th></tr>';
+    for (const p of policies) {
+      const sourceColor = p.source === 'db' ? 'var(--purple)' : 'var(--cyan)';
+      const agents = (p.agents || []).join(', ') || '*';
+      html += `<tr>
+        <td style="color:var(--text)">${esc(p.name)}</td>
+        <td style="color:var(--text-dim);text-align:center">${p.priority}</td>
+        <td style="color:var(--text-dim);font-size:11px">${esc(agents)}</td>
+        <td><span style="color:var(--green)">✔${p.allow_count}</span> <span style="color:var(--red)">✘${p.deny_count}</span></td>
+      </tr>`;
+    }
+    html += '</table>';
+    el.innerHTML = html;
+  } catch (e) {}
+}
+
+async function fetchAll() {
+  await fetchMetrics();
+  await fetchAgents();
+  await fetchAuditSummary();
+  await fetchScan();
+  await fetchAuditFeed();
+  await fetchPolicies();
+}
+
+// Start
+fetchAll();
+updateClock();
+setInterval(fetchAll, 3000);
+setInterval(updateClock, 1000);
+</script>
+</body>
+</html>

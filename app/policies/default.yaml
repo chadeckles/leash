@@ -1,0 +1,18 @@
+# Default policy – applies to all agents
+#
+# DENY-BY-DEFAULT: No action is permitted unless explicitly allowed by a
+# higher-priority policy.  This is the catch-all safety net.
+# Create agent-specific policies in this directory or via the API to grant access.
+name: default
+description: >-
+  Deny-by-default baseline.  All actions are blocked unless a higher-priority
+  policy explicitly allows them.  This enforces least-privilege.
+priority: 0
+agents:
+  - "*"
+
+rules:
+  - action: "*"
+    effect: deny
+    reason: "Default policy: no action is allowed unless explicitly permitted"
+    owasp: ["ASI02", "LLM06"]

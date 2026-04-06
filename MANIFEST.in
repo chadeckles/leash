@@ -5,7 +5,7 @@ include pyproject.toml
 include requirements.txt
 recursive-include app *.py *.yaml *.html *.png
 recursive-include sdk *.py
-recursive-include assets *.png *.svg *.ico
+include assets/leash_icon.png
 
 # Exclude everything else
 prune tests
@@ -13,6 +13,7 @@ prune docs
 prune scripts
 prune .github
 exclude STRATEGY.md
+exclude DEMO.md
 exclude SECURITY.md
 exclude CONTRIBUTING.md
 exclude CHANGELOG.md

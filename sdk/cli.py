@@ -448,11 +448,14 @@ def cmd_agents_deregister(args: argparse.Namespace) -> None:
     print()
 
 def cmd_agents_show(args: argparse.Namespace) -> None:
-    # Prefer the target agent's own cached token (identity enforcement)
-    token = _find_agent_token(args.agent_id) or _require_token(args)
+    # Bootstrap a client to resolve the identifier
+    token = _require_token(args)
     client = _get_client(args.url, token)
+    agent_id, agent_token = _resolve_agent_id(client, args.agent_id)
+    # Re-create client with the agent's own token for identity enforcement
+    client = _get_client(args.url, agent_token or token)
 
-    resp = client.get(f"/agents/{args.agent_id}")
+    resp = client.get(f"/agents/{agent_id}")
     if resp.status_code == 404:
         print(f"\n  Agent '{args.agent_id}' not found.\n", file=sys.stderr)
         sys.exit(1)
@@ -476,11 +479,14 @@ def cmd_agents_show(args: argparse.Namespace) -> None:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def cmd_agents_permissions(args: argparse.Namespace) -> None:
-    # Prefer the target agent's own cached token (identity enforcement)
-    token = _find_agent_token(args.agent_id) or _require_token(args)
+    # Bootstrap a client to resolve the identifier
+    token = _require_token(args)
     client = _get_client(args.url, token)
+    agent_id, agent_token = _resolve_agent_id(client, args.agent_id)
+    # Re-create client with the agent's own token for identity enforcement
+    client = _get_client(args.url, agent_token or token)
 
-    resp = client.get(f"/agents/{args.agent_id}/permissions")
+    resp = client.get(f"/agents/{agent_id}/permissions")
     if resp.status_code == 404:
         print(f"\n  Agent '{args.agent_id}' not found.\n", file=sys.stderr)
         sys.exit(1)
@@ -492,7 +498,8 @@ def cmd_agents_permissions(args: argparse.Namespace) -> None:
     allowed = data.get("allowed_actions", 0)
     denied = data.get("denied_actions", 0)
 
-    print(f"\n  Effective permissions for: {data.get('agent_id', '?')}")
+    display = args.agent_id if args.agent_id != agent_id else agent_id
+    print(f"\n  Effective permissions for: {display}")
     print(f"  Rules: {total} (✔ {allowed} allow, ✘ {denied} deny)")
     print(f"  {'─' * 60}")
 
@@ -730,7 +737,8 @@ def cmd_audit_log(args: argparse.Namespace) -> None:
     print(f"  {'─' * 70}")
 
     for e in entries:
-        icon = "✔" if e.get("decision") == "allow" else "✘"
+        decision = e.get("policy_decision") or e.get("decision") or "?"
+        icon = "✔" if decision == "allow" else "✘"
         ts = _fmt_time(e.get("timestamp"))
         action = e.get("action", "?")
         agent = e.get("agent_id", "?")[:12]
@@ -893,10 +901,33 @@ def cmd_status(args: argparse.Namespace) -> None:
             lines = resp.text.strip().split("\n")
             metrics = [line for line in lines if not line.startswith("#") and line.strip()]
             print(f"  Metrics: {len(metrics)} data points")
-            for m in metrics[:10]:
+
+            # Group: show key aggregate metrics first, then a compact summary
+            key_prefixes = (
+                "leash_agents_registered",
+                "leash_audit_entries",
+                "leash_authorize_total",
+                "leash_policies_loaded",
+            )
+            key_metrics = [m for m in metrics if any(m.startswith(p) for p in key_prefixes)]
+            other_metrics = [m for m in metrics if m not in key_metrics]
+
+            for m in key_metrics:
                 print(f"    {m}")
-            if len(metrics) > 10:
-                print(f"    ... and {len(metrics) - 10} more")
+
+            if other_metrics:
+                # Show a compact summary of remaining metrics
+                http_count = sum(1 for m in other_metrics if "http_request" in m and "duration" not in m)
+                duration_count = sum(1 for m in other_metrics if "duration" in m)
+                rest = len(other_metrics) - http_count - duration_count
+                parts = []
+                if http_count:
+                    parts.append(f"{http_count} HTTP counters")
+                if duration_count:
+                    parts.append(f"{duration_count} latency metrics")
+                if rest > 0:
+                    parts.append(f"{rest} other")
+                print(f"    + {', '.join(parts)}")
     except Exception:
         pass
 

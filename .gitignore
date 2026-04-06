@@ -12,6 +12,7 @@ build/
 venv/
 env/
 .env
+.pypirc
 
 # Leash runtime (generated on first boot)
 *.db
@@ -33,6 +34,10 @@ htmlcov/
 *.swp
 *.swo
 .DS_Store
+
+# Internal docs
+DEMO.md
+STRATEGY.md
 
 # Docs build output
 site/

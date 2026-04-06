@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/leash.png" alt="Leash – Keep your AI agents on a leash" width="700">
+  <img src="https://raw.githubusercontent.com/chadeckles/leash/main/assets/leash.png" alt="Leash – Keep your AI agents on a leash" width="700">
 </p>
 
 <p align="center">
@@ -14,7 +14,7 @@
 
 **Keep your AI agents on a leash.**
 
-You wouldn't let a dog roam the neighborhood unsupervised — so why let an AI agent read your files, send emails, and call APIs without guardrails? Leash is the authorization and audit layer that sits between your agent and the outside world. You write simple YAML rules that say what's allowed. Everything else is denied. Every decision — allow or deny — is logged in a cryptographically signed, hash-chained audit trail that's tamper-evident by design.
+You wouldn't let a dog roam the neighborhood unsupervised, so why let an AI agent read your files, send emails, and call APIs _without_ guardrails? Leash is an API-layer policy engine that sits between your agent and the outside world — no containers, no sidecars, just authorization. You write simple YAML rules that say what's allowed. Everything else is denied. Every decision from allow or deny activities is logged in a cryptographically signed, hash-chained audit trail that's tamper-evident by design.
 
 One `pip install`, one policy file, and your agent is on a leash.
 
@@ -27,6 +27,7 @@ One `pip install`, one policy file, and your agent is on a leash.
 - 🔍 **Security scanner** — discover an MCP server's tools, classify risk, generate policies
 - 🧩 **Framework-agnostic** — Python SDK, MCP proxy, or plain REST
 - 🧠 **[OpenClaw ready](docs/docs/openclaw-guide.md)** — built-in policies for the popular open-source AI assistant
+- 🛡️ **OWASP mapped** — rules and audit checks reference [OWASP ASI](https://owasp.org/www-project-agentic-security-initiative/) and [LLM Top 10](https://owasp.org/www-project-top-10-for-large-language-model-applications/) threat IDs
 - ⚡ **One dependency** — `pip install leash`. No Go, no Rust, no sidecar containers
 - 📖 **[Full documentation](docs/docs/index.md)** — getting started, policy writing guide, SDK reference, CLI reference, architecture
 

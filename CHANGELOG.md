@@ -4,6 +4,19 @@ All notable changes to Leash will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] — 2026-04-06
+
+### Fixed
+- **CLI** — `agents permissions` and `agents show` now resolve agent names correctly (no longer requires raw UUID)
+- **CLI** — `status` output no longer truncates long metric lines; shows key aggregates with compact summary
+- **CLI** — `audit log` icons now correctly show ✔/✘ based on the `policy_decision` field
+
+### Changed
+- **README** — clarified positioning as an API-layer policy engine; added OWASP mapping highlight and StrongDM FAQ
+- **PyPI package** — removed 3.5MB banner image from sdist; README now references GitHub-hosted image (package size: 4.7MB → 1.1MB)
+
+---
+
 ## [0.2.0] — 2026-04-02
 
 ### Added

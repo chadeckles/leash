@@ -10,17 +10,23 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-# Point keys to a temp directory so tests don't pollute the project
-_tmp_keys = tempfile.mkdtemp(prefix="leash_keys_")
-os.environ["KEYS_DIR"] = _tmp_keys
+# Isolate all Leash state (db, keys, tokens) from the developer's ~/.leash,
+# while evaluating the bundled presets as the live policy set.
+from pathlib import Path  # noqa: E402
 
-from app.core.database import Base, get_db  # noqa: E402
-from app.main import app as fastapi_app  # noqa: E402
+_tmp_home = tempfile.mkdtemp(prefix="leash_home_")
+os.environ["LEASH_HOME"] = _tmp_home
+os.environ["POLICIES_DIR"] = str(Path(__file__).resolve().parent.parent / "src" / "leash" / "presets")
+os.environ.pop("KEYS_DIR", None)
+os.environ.pop("DATABASE_URL", None)
+
+from leash.server.core.database import Base, get_db  # noqa: E402
+from leash.server.main import app as fastapi_app  # noqa: E402
 
 # Ensure all models are imported so create_all picks up every table
-import app.models.agent  # noqa: E402, F401
-import app.models.audit  # noqa: E402, F401
-import app.models.policy  # noqa: E402, F401
+import leash.server.models.agent  # noqa: E402, F401
+import leash.server.models.audit  # noqa: E402, F401
+import leash.server.models.policy  # noqa: E402, F401
 
 
 @pytest.fixture(scope="session")
@@ -62,7 +68,7 @@ def admin_headers(client, name=None):
     return its Authorization header."""
     import uuid
 
-    from app.core.security import get_admin_key
+    from leash.server.core.security import get_admin_key
 
     name = name or f"test-admin-{uuid.uuid4().hex[:8]}"
 

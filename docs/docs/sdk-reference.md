@@ -4,18 +4,18 @@ The Python SDK wraps the authorize → execute → audit cycle so your agent cod
 
 ## Installation
 
-The SDK is included in the Leash repository. If you've cloned the repo and installed dependencies, it's ready to use:
+Install the SDK/CLI/engine core with `pip install leash` or `uv add leash`:
 
 ```python
-from sdk import LeashAgent
+from leash import LeashAgent
 ```
 
 ## Quick Example
 
 ```python
-from sdk import LeashAgent
+from leash import LeashAgent
 
-agent = LeashAgent("http://localhost:8000", name="my-agent")
+agent = LeashAgent(name="my-agent")
 
 @agent.tool("email.read")
 def read_inbox(mailbox: str):
@@ -40,13 +40,13 @@ If the action is denied, the function **doesn't run**. If Leash is unreachable, 
 
 ```python
 LeashAgent(
-    base_url="http://localhost:8000",
+    base_url=None,
     *,
     name="leash-agent",
     vendor=None,           # e.g. "openai", "anthropic"
     agent_type=None,       # e.g. "coding", "research"
     tags=None,             # e.g. ["production", "team-a"]
-    token_file=".leash_identity.json",
+    token_file="<auto>",
     auto_register=True,
     fail_closed=True,
 )
@@ -54,12 +54,12 @@ LeashAgent(
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `base_url` | `str` | `http://localhost:8000` | Leash server URL |
+| `base_url` | `str \| None` | `$LEASH_URL` or `http://localhost:8000` | Leash server URL |
 | `name` | `str` | `leash-agent` | Agent name — this is how policies match you |
 | `vendor` | `str` | `None` | Optional vendor label for fleet management |
 | `agent_type` | `str` | `None` | Optional type label for filtering |
 | `tags` | `list[str]` | `None` | Optional tags for grouping |
-| `token_file` | `str \| Path \| None` | `.leash_identity.json` | Where to cache the JWT. `None` = no caching |
+| `token_file` | `str \| Path \| None` | `~/.leash/agents/<name>.json` | Where to cache the JWT. `None` = no caching. A legacy `./.leash_identity.json` is still read if it matches the agent name |
 | `auto_register` | `bool` | `True` | Auto-register with Leash on first use |
 | `fail_closed` | `bool` | `True` | **Deny** actions when Leash is unreachable |
 
@@ -78,14 +78,14 @@ Raises `ConnectionError` with a clear message if the server is unreachable.
 
 ### Automatic Token Refresh
 
-If a JWT expires or is revoked (e.g. after server key rotation), the SDK handles it transparently:
+If a JWT expires (for example after server key rotation), the SDK refreshes it transparently:
 
-1. An `authorize()` or `audit()` call returns **401**
+1. An `authorize()` or `audit()` call returns **401** for an expired token
 2. The SDK silently discards the old identity and cached token file
 3. Re-registers with the server to get a fresh JWT
 4. Retries the original request
 
-This means your agent code never has to worry about token lifecycle — it just works.
+If the server reports the token was revoked, the SDK raises `LeashRevoked` and does **not** re-register. An operator must re-register or rotate the agent.
 
 ### authorize()
 
@@ -273,7 +273,7 @@ This is useful for bootstrapping: `discover` creates the policy skeleton, then a
 Use `with` for clean setup/teardown:
 
 ```python
-with LeashAgent("http://localhost:8000", name="my-agent") as agent:
+with LeashAgent(name="my-agent") as agent:
     @agent.tool("file.read")
     def read_file(path):
         return open(path).read()
@@ -284,12 +284,27 @@ with LeashAgent("http://localhost:8000", name="my-agent") as agent:
 
 ---
 
+## In-Process Policy Engine
+
+Use `leash.engine` when you want local policy decisions without the FastAPI server or database. The engine has no FastAPI, SQLAlchemy, or HTTP imports.
+
+```python
+from leash.engine import PolicyEngine
+
+engine = PolicyEngine.from_directory("~/.leash/policies")
+decision = engine.evaluate("agent-1", "email.send", agent_name="email-bot")
+if not decision.allowed:
+    print(decision.reason)
+```
+
+`evaluate()` returns a `Decision` with `decision`, `reason`, `matched_policy`, `matched_rule`, `owasp`, `observation`, and `.allowed`. Policy directories are cached and re-scanned at most once per second.
+
 ## LeashDenied Exception
 
 Raised when an action is denied (with `on_deny="raise"`):
 
 ```python
-from sdk.client import LeashDenied
+from leash import LeashDenied
 
 try:
     delete_file("/important.txt")
@@ -319,11 +334,9 @@ except LeashDenied as e:
 An agent that reads customer data and generates reports, with proper error handling:
 
 ```python
-from sdk import LeashAgent
-from sdk.client import LeashDenied
+from leash import LeashAgent, LeashDenied
 
 agent = LeashAgent(
-    "http://localhost:8000",
     name="report-generator",
     vendor="internal",
     agent_type="analytics",

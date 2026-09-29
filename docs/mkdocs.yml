@@ -26,6 +26,7 @@ nav:
   - SDK Reference: sdk-reference.md
   - CLI Reference: cli-reference.md
   - Architecture: architecture.md
+  - Roadmap: roadmap.md
 
 markdown_extensions:
   - admonition

@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
-from sdk.scanner import (
+from leash.scanner import (
     classify_tool,
     classify_tools,
     analyze_policy_coverage,
@@ -140,7 +140,7 @@ def test_scanner_classification_and_coverage():
     assert "fs-*" in doc_ca["agents"]
 
     # Generated policy passes validator
-    from app.policy.validator import validate_policy_yaml
+    from leash.engine.validator import validate_policy_yaml
     scan.target = "test"
     errors = validate_policy_yaml(generate_policy(scan, policy_name="val-test"))
     assert [e for e in errors if "warning" not in e.lower()] == []

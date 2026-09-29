@@ -14,7 +14,7 @@ import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from unittest.mock import patch
 
-from app.core.security import sign_data, hash_data
+from leash.server.core.security import sign_data, hash_data
 from tests.conftest import register_agent, admin_headers
 
 
@@ -367,7 +367,7 @@ def test_audit_webhooks_and_sinks(client):
     with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
         sink_path = f.name
     try:
-        with patch("app.core.config.AUDIT_SINK", sink_path):
+        with patch("leash.server.core.config.AUDIT_SINK", sink_path):
             aid, hdr = register_agent(client, "sink-agent")
             client.post("/policies/managed", json={
                 "name": f"sink-{aid[:8]}", "priority": 100,
@@ -384,7 +384,7 @@ def test_audit_webhooks_and_sinks(client):
         os.unlink(sink_path)
 
     # ── File sink no-op ──
-    with patch("app.core.config.AUDIT_SINK", ""):
+    with patch("leash.server.core.config.AUDIT_SINK", ""):
         noop_id, noop_h = register_agent(client, "nosink")
         client.post("/audit", json={"agent_id": noop_id, "action": "test", "policy_decision": "allow"}, headers=noop_h)
 
@@ -395,7 +395,7 @@ def test_audit_webhooks_and_sinks(client):
     thread = threading.Thread(target=server.handle_request, daemon=True)
     thread.start()
 
-    with patch("app.core.config.WEBHOOK_URL", f"http://127.0.0.1:{port}/hook"):
+    with patch("leash.server.core.config.WEBHOOK_URL", f"http://127.0.0.1:{port}/hook"):
         wh_id, wh_h = register_agent(client, "webhook-agent")
         client.post("/audit", json={"agent_id": wh_id, "action": "webhook_test", "policy_decision": "allow"}, headers=wh_h)
 
@@ -405,6 +405,6 @@ def test_audit_webhooks_and_sinks(client):
     assert _WebhookCollector.received[0]["action"] == "webhook_test"
 
     # ── Webhook no-op ──
-    with patch("app.core.config.WEBHOOK_URL", ""):
+    with patch("leash.server.core.config.WEBHOOK_URL", ""):
         noop2_id, noop2_h = register_agent(client, "nowebhook")
         client.post("/audit", json={"agent_id": noop2_id, "action": "test", "policy_decision": "allow"}, headers=noop2_h)

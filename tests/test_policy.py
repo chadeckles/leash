@@ -214,10 +214,12 @@ def test_rate_limiting(client):
     # Agent A: first call allowed
     assert client.post("/authorize", json={"agent_id": aid_a, "action": "limited.call"}, headers=hdr_a).json()["decision"] == "allow"
 
-    # Seed 2 audit entries so Agent A hits the limit
+    # Post-execution /audit entries (e.g. from the SDK decorator) don't consume quota
     for _ in range(2):
         client.post("/audit", json={"agent_id": aid_a, "action": "limited.call", "policy_decision": "allow"}, headers=hdr_a)
+    assert client.post("/authorize", json={"agent_id": aid_a, "action": "limited.call"}, headers=hdr_a).json()["decision"] == "allow"
 
+    # Third authorization exceeds max_calls=2
     data = client.post("/authorize", json={"agent_id": aid_a, "action": "limited.call"}, headers=hdr_a).json()
     assert data["decision"] == "deny"
     assert "Rate limit exceeded" in data["reason"]

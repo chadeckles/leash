@@ -4,7 +4,7 @@
 
 You wouldn't let a dog roam the neighborhood unsupervised — so why let an AI agent read your files, send emails, and call APIs without guardrails? Leash is the authorization and audit layer that sits between your agent and the outside world. You write simple YAML rules that say what's allowed. Everything else is denied. Every decision is logged in a cryptographically signed, hash-chained audit trail that's tamper-evident by design.
 
-One `pip install`, one policy file, and your agent is on a leash.
+One install, one policy file, and your agent is on a leash.
 
 ---
 
@@ -47,7 +47,7 @@ Your Agent ──▶ Leash ──▶ allow or deny
 ## Installation
 
 ```bash
-pip install leash
+uv tool install 'leash[server]'
 leash start
 ```
 

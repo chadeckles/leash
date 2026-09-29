@@ -28,7 +28,7 @@ Leash's MCP proxy adds all of this as a transparent layer.
 ### 1. Start the Leash server
 
 ```bash
-pip install leash
+uv tool install 'leash[server]'
 leash start
 ```
 
@@ -47,7 +47,7 @@ Wrap it with the Leash proxy:
 
 ```bash
 # After (every tool call goes through Leash):
-python -m sdk.mcp_proxy \
+leash-mcp-proxy \
     --agent-name "fs-agent" \
     -- npx -y @modelcontextprotocol/server-filesystem /data
 ```
@@ -81,7 +81,7 @@ Edit your `claude_desktop_config.json`:
     "guarded-filesystem": {
       "command": "python",
       "args": [
-        "-m", "sdk.mcp_proxy",
+        "-m", "leash.mcp_proxy",
         "--leash-url", "http://localhost:8000",
         "--agent-name", "claude-fs-agent",
         "--",
@@ -104,7 +104,7 @@ Restart Claude Desktop. The filesystem tools now go through Leash.
     "guarded-filesystem": {
       "command": "python",
       "args": [
-        "-m", "sdk.mcp_proxy",
+        "-m", "leash.mcp_proxy",
         "--agent-name", "claude-fs",
         "--",
         "npx", "-y", "@modelcontextprotocol/server-filesystem", "/data"
@@ -113,7 +113,7 @@ Restart Claude Desktop. The filesystem tools now go through Leash.
     "guarded-github": {
       "command": "python",
       "args": [
-        "-m", "sdk.mcp_proxy",
+        "-m", "leash.mcp_proxy",
         "--agent-name", "claude-github",
         "--",
         "npx", "-y", "@modelcontextprotocol/server-github"
@@ -122,7 +122,7 @@ Restart Claude Desktop. The filesystem tools now go through Leash.
     "guarded-postgres": {
       "command": "python",
       "args": [
-        "-m", "sdk.mcp_proxy",
+        "-m", "leash.mcp_proxy",
         "--agent-name", "claude-postgres",
         "--",
         "npx", "-y", "@modelcontextprotocol/server-postgres",
@@ -145,7 +145,7 @@ In Cursor, go to **Settings → MCP** and add a server. The command format is th
     "guarded-filesystem": {
       "command": "python",
       "args": [
-        "-m", "sdk.mcp_proxy",
+        "-m", "leash.mcp_proxy",
         "--agent-name", "cursor-fs",
         "--",
         "npx", "-y", "@modelcontextprotocol/server-filesystem",
@@ -182,7 +182,7 @@ The `@modelcontextprotocol/server-filesystem` server exposes:
 
 ### Example Policy for a Filesystem MCP Server
 
-Create `app/policies/claude_fs.yaml`:
+Create `~/.leash/policies/claude_fs.yaml`:
 
 ```yaml
 name: claude-fs-policy
@@ -284,7 +284,7 @@ leash agents permissions <agent-id>
 To disable auto-discovery:
 
 ```bash
-python -m sdk.mcp_proxy \
+leash-mcp-proxy \
     --agent-name "fs-agent" \
     --no-auto-discover \
     -- npx -y @modelcontextprotocol/server-filesystem /data
@@ -312,7 +312,7 @@ This maps to OWASP ASI02 (Tool Misuse & Exploitation).
 | `--on-tool-change` | `block` | When a tool definition changes mid-session: `block` further calls or only `warn` |
 | `--no-auto-discover` | (off) | Don't auto-create a policy from discovered tools |
 
-The proxy caches its identity at `~/.leash/mcp_<agent-name>.json` (mode `0600`).
+The proxy caches its identity at `~/.leash/agents/mcp_<agent-name>.json` (mode `0600`).
 
 ## Troubleshooting
 

@@ -58,7 +58,7 @@ Leash is designed with security as a core principle:
 
 - **Deny by default** — no action is allowed unless explicitly permitted by policy
 - **Fail closed** — SDK blocks actions when the server is unreachable
-- **RS256 JWT** — 2048-bit RSA signatures, not shared secrets
+- **EdDSA JWT** — Ed25519 signatures for new keys; legacy RSA/RS256 keys from ≤0.3 remain verifiable until rotation
 - **Token versioning** — key rotation server-side invalidates all prior JWTs
 - **Server key rotation** — graceful rotation with previous-key fallback
 - **Hash-chained audit** — tamper-evident append-only log
@@ -82,11 +82,11 @@ multiple Leash server processes pointing at the same database.
 
 | Path | Content | Persistence |
 |------|---------|-------------|
-| `/app/.keys/server_private.pem` | Server signing key (signs all JWTs + audit entries) | Docker volume `leash-keys` |
-| `/app/.keys/server_public.pem` | Server public key (verifies JWTs + signatures) | Docker volume `leash-keys` |
-| `/app/.keys/server_public.prev.pem` | Previous public key (after key rotation) | Docker volume `leash-keys` |
-| `/app/data/leash.db` | SQLite database (agents, audit log, managed policies) | Docker volume `leash-data` |
-| `/app/app/policies/` | YAML policy files (bind-mounted read-only) | Host filesystem |
+| `/data/keys/server_private.pem` | Server signing key (signs all JWTs + audit entries) | Docker volume `leash-data` |
+| `/data/keys/server_public.pem` | Server public key (verifies JWTs + signatures) | Docker volume `leash-data` |
+| `/data/keys/server_public.prev.pem` | Previous public key (after key rotation) | Docker volume `leash-data` |
+| `/data/leash.db` | SQLite database (agents, audit log, managed policies) | Docker volume `leash-data` |
+| `/data/policies/` | YAML policy files (seeded on first start; optionally bind-mounted read-only) | Docker volume or host mount |
 
 ### Backup strategy
 
@@ -94,12 +94,9 @@ multiple Leash server processes pointing at the same database.
 # 1. Stop the container (clean SQLite snapshot)
 docker compose stop leash
 
-# 2. Copy the Docker volumes
+# 2. Copy the Docker volume
 docker run --rm -v leash-data:/data -v $(pwd)/backup:/backup alpine \
-  cp /data/leash.db /backup/leash.db
-
-docker run --rm -v leash-keys:/keys -v $(pwd)/backup:/backup alpine \
-  cp -r /keys/. /backup/keys/
+  sh -c 'cp /data/leash.db /backup/leash.db && cp -r /data/keys /backup/keys'
 
 # 3. Restart
 docker compose start leash
@@ -110,8 +107,8 @@ For **hot backups** (no downtime), use SQLite's backup API:
 ```bash
 docker exec leash-server python3 -c "
 import sqlite3
-src = sqlite3.connect('/app/data/leash.db')
-dst = sqlite3.connect('/app/data/leash-backup.db')
+src = sqlite3.connect('/data/leash.db')
+dst = sqlite3.connect('/data/leash-backup.db')
 src.backup(dst)
 dst.close(); src.close()
 print('Backup complete')
@@ -173,8 +170,8 @@ curl -X POST http://localhost:8000/admin/rotate-server-keys \
 
 ```bash
 # Archive old keys manually
-docker exec leash-server mv /app/.keys/server_private.pem /app/.keys/server_private.prev.pem
-docker exec leash-server mv /app/.keys/server_public.pem  /app/.keys/server_public.prev.pem
+docker exec leash-server mv /data/keys/server_private.pem /data/keys/server_private.prev.pem
+docker exec leash-server mv /data/keys/server_public.pem  /data/keys/server_public.prev.pem
 
 # Delete the in-memory cache by restarting
 docker compose restart leash
@@ -220,7 +217,10 @@ Before deploying Leash to any network-accessible environment:
 | **Admin bootstrap key** | `LEASH_ADMIN_KEY` | Auto-generated at `KEYS_DIR/admin.key` (0600) | Required (as `X-Leash-Admin-Key`) to register admin-type agents (`cli`/`admin`/`ops`) |
 | **JWT expiration** | `JWT_EXPIRATION_HOURS=168` | `168` (7 days) | Workweek-friendly; SDK auto-refreshes on expiry |
 | **CORS origins** | `LEASH_CORS_ORIGINS=http://localhost:8000` | Your origins only | Prevents cross-origin attacks |
-| **Keys directory** | `KEYS_DIR=/app/.keys` | Docker volume | Persists signing keys across restarts |
+| **State root** | `LEASH_HOME=/data` (Docker), `~/.leash` (local) | Docker volume or local directory | Root for policies, keys, DB, CLI token, and agent identities |
+| **Keys directory** | `KEYS_DIR=$LEASH_HOME/keys` | `KEYS_DIR` override | Persists signing keys across restarts |
+| **Policies directory** | `POLICIES_DIR=$LEASH_HOME/policies` | `POLICIES_DIR` override | YAML policies; presets seed here once and edits reload live |
+| **Database** | `DATABASE_URL=sqlite:///$LEASH_HOME/leash.db` | `DATABASE_URL` override | SQLite by default |
 | **Disable demo mode** | `LEASH_DEMO=false` | `false` (default) | No seed data endpoint |
 
 ### Docker Compose (production-ready)
@@ -232,7 +232,8 @@ docker compose up -d
 ```
 
 > The compose file binds to **127.0.0.1:8000** by default.  Use a reverse
-> proxy (nginx, Caddy, Traefik) with TLS if exposing externally.
+> proxy (nginx, Caddy, Traefik) with TLS if exposing externally. To manage
+> policies from the host, mount `./policies:/data/policies:ro`.
 
 ### Day-1 bootstrap
 
@@ -241,7 +242,7 @@ docker compose up -d
 docker compose up -d
 
 # 2. Initialize your admin CLI token (needs the server's admin key)
-export LEASH_ADMIN_KEY=$(docker exec leash-server cat /app/.keys/admin.key)
+export LEASH_ADMIN_KEY=$(docker exec leash-server cat /data/keys/admin.key)
 leash init --name ops-admin
 
 # 3. Verify everything is healthy

@@ -9,8 +9,8 @@ from datetime import datetime, timedelta, timezone
 
 import jwt
 
-from app.core.config import JWT_ALGORITHM, JWT_ISSUER
-from app.core.security import get_server_private_key, get_server_public_key
+from leash.server.core.config import JWT_ALGORITHM, JWT_ISSUER
+from leash.server.core.security import get_server_private_key, get_server_public_key
 from tests.conftest import admin_headers
 
 
@@ -132,7 +132,7 @@ def test_server_key_rotation_graceful(client):
     """Server key rotation: existing JWTs remain valid via previous-key fallback,
     new JWTs use the new key, and audit signature verification works across rotation.
     """
-    from app.core.security import (
+    from leash.server.core.security import (
         rotate_server_keys, verify_agent_token, sign_data,
         verify_signature, get_server_key_info, create_agent_token,
     )

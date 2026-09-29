@@ -53,7 +53,7 @@ These are the default tools OpenClaw exposes — each one becomes a Leash action
 ### 1. Install and start Leash
 
 ```bash
-pip install leash
+uv tool install 'leash[server]'
 leash start
 ```
 
@@ -76,7 +76,7 @@ You'll see output like:
   Policies applied: openclaw-policy
   Effective rules:  ✔ 10 allow   ✘ 12 deny
 
-  Token saved → ~/.leash/openclaw-agent.json
+  Token saved → ~/.leash/agents/openclaw-agent.json
 ```
 
 The agent ID and token are saved automatically. Leash policies match on the **agent name** (via wildcard patterns like `*openclaw*`), so naming is what matters here.
@@ -86,7 +86,7 @@ The agent ID and token are saved automatically. Leash policies match on the **ag
 
 ### 3. Verify the built-in policy works
 
-Leash ships with an OpenClaw policy at `app/policies/openclaw.yaml`. It matches any agent with "openclaw" or "claw" in the name. Confirm it applied:
+Leash ships with an OpenClaw policy preset that is seeded to `~/.leash/policies/openclaw.yaml` on first server start. It matches any agent with "openclaw" or "claw" in the name. Confirm it applied:
 
 ```bash
 leash policy test --action read --agent "openclaw-agent"
@@ -107,12 +107,12 @@ The built-in policy defaults:
 
 #### Option A: Python SDK
 
-The SDK is included when you `pip install leash`. Wrap your OpenClaw tool functions so every call is authorized, executed, and audit-logged automatically:
+Install the SDK with `pip install leash` or `uv add leash`. Wrap your OpenClaw tool functions so every call is authorized, executed, and audit-logged automatically:
 
 ```python
-from sdk import LeashAgent
+from leash import LeashAgent
 
-agent = LeashAgent("http://localhost:8000", name="openclaw-agent")
+agent = LeashAgent(name="openclaw-agent")
 
 @agent.tool("exec")
 def run_command(command: str):
@@ -144,12 +144,12 @@ See the [SDK Reference](sdk-reference.md) for the full API.
 
 #### Option B: REST API (any language)
 
-Call Leash before each OpenClaw tool execution. The agent ID and token come from Step 2 — they're saved in `~/.leash/openclaw-agent.json`:
+Call Leash before each OpenClaw tool execution. The agent ID and token come from Step 2 — they're saved in `~/.leash/agents/openclaw-agent.json`:
 
 ```bash
 # Load your agent's credentials:
-export AGENT_ID=$(cat ~/.leash/openclaw-agent.json | jq -r .agent_id)
-export TOKEN=$(cat ~/.leash/openclaw-agent.json | jq -r .token)
+export AGENT_ID=$(cat ~/.leash/agents/openclaw-agent.json | jq -r .agent_id)
+export TOKEN=$(cat ~/.leash/agents/openclaw-agent.json | jq -r .token)
 
 # Check permission before running 'exec':
 curl -s -X POST http://localhost:8000/authorize \
@@ -169,7 +169,7 @@ The built-in policy is a solid starting point, but the best policies are built f
 
 ### 1. Deploy in observe mode
 
-Create `app/policies/openclaw_observe.yaml`:
+Create `~/.leash/policies/openclaw_observe.yaml`:
 
 ```yaml
 name: openclaw-observe

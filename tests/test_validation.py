@@ -10,8 +10,8 @@ import textwrap
 import threading
 from pathlib import Path
 
-from app.policy.validator import validate_policy, validate_policy_yaml
-from app.core.metrics import _Metrics
+from leash.engine.validator import validate_policy, validate_policy_yaml
+from leash.server.core.metrics import _Metrics
 from tests.conftest import register_agent
 
 
@@ -82,7 +82,7 @@ def test_policy_validator_and_metrics():
     assert any("mode" in e for e in validate_policy({**base, "mode": 42}))
 
     # ── Shipped policy files all valid ──
-    from app.core.config import POLICIES_DIR
+    from leash.server.core.config import POLICIES_DIR
     policy_dir = Path(POLICIES_DIR)
     for yf in list(policy_dir.glob("*.yaml")) + list(policy_dir.glob("*.yml")):
         real_errors = [i for i in validate_policy_yaml(yf.read_text()) if "recommended" not in i.lower()]
@@ -186,8 +186,8 @@ def test_yaml_error_api_responses(client, auth_header):
 
     # ── Corrupt DB policy doesn't crash authorize ──
     aid, hdr = register_agent(client, "corrupt-agent")
-    from app.core.database import get_db
-    from app.models.policy import Policy
+    from leash.server.core.database import get_db
+    from leash.server.models.policy import Policy
     db = next(get_db())
     corrupt = Policy(name="corrupt-policy", priority=100, yaml_content="{{not valid", active=True)
     db.add(corrupt)

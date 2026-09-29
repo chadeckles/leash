@@ -10,7 +10,7 @@ from unittest.mock import patch
 import httpx
 import pytest
 
-from sdk.client import LeashAgent, LeashDenied
+from leash.client import LeashAgent, LeashDenied
 from tests.conftest import admin_headers
 
 
@@ -91,7 +91,7 @@ def test_sdk_connect_and_tool_decorator(client, auth_header, tmp_path):
     def log_delete(path: str):
         return "deleted"
 
-    with patch("sdk.client.logger") as mock_logger:
+    with patch("leash.client.logger") as mock_logger:
         assert log_delete("/test") is None
         mock_logger.warning.assert_called()
 
@@ -215,7 +215,7 @@ def test_sdk_guard_and_discover(client, auth_header, tmp_path):
     assert empty_agent.discover() == {}
 
     # ── MCP proxy tool hash detection ──
-    from sdk.mcp_proxy import MCPProxy
+    from leash.mcp_proxy import MCPProxy
     proxy = MCPProxy(upstream_cmd=["echo"], leash_url="http://localhost:8000",
                      agent_name="hash-test", auto_discover=False)
     first_response = {"result": {"tools": [

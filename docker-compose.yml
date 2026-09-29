@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   leash:
     build: .
@@ -8,14 +6,11 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
-      - ./app/policies:/app/app/policies:ro
-      - leash-data:/app/data
-      - leash-keys:/app/.keys
+      # All state: leash.db, keys/ (incl. admin.key), policies/ (seeded from presets)
+      - leash-data:/data
+      # To manage policies from the host instead, mount a directory:
+      # - ./policies:/data/policies:ro
     environment:
-      # ── Core ──
-      - DATABASE_URL=sqlite:////app/data/leash.db
-      - KEYS_DIR=/app/.keys
-      - POLICIES_DIR=/app/app/policies
       # ── Security hardening (all recommended for production) ──
       - LEASH_REQUIRE_AUTH_REGISTER=true
       - LEASH_REQUIRE_AUTH_READ=true
@@ -24,7 +19,7 @@ services:
       - LEASH_CORS_ORIGINS=http://localhost:8000,http://127.0.0.1:8000
       # ── Audit export (optional) ──
       # - LEASH_WEBHOOK_URL=https://your-siem.example.com/ingest
-      # - LEASH_AUDIT_SINK=/app/data/audit.jsonl
+      # - LEASH_AUDIT_SINK=/data/audit.jsonl
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()"]
       interval: 30s
@@ -34,4 +29,3 @@ services:
 
 volumes:
   leash-data:
-  leash-keys:

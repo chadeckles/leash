@@ -8,6 +8,7 @@ Everything lives under a single home directory, like ``~/.claude`` or
       keys/          server signing keys + admin.key
       leash.db       server database
       token.json     CLI identity
+      agents/        cached SDK / MCP proxy agent identities
 
 ``LEASH_HOME`` overrides the root.  ``POLICIES_DIR``, ``KEYS_DIR`` and
 ``DATABASE_URL`` still override individual locations.
@@ -44,6 +45,26 @@ def database_url() -> str:
 
 def token_file() -> Path:
     return leash_home() / "token.json"
+
+
+def agents_dir() -> Path:
+    return leash_home() / "agents"
+
+
+def agent_identity_file(name: str) -> Path:
+    """Cached identity for an SDK/proxy/CLI-registered agent."""
+    safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in name) or "agent"
+    return agents_dir() / f"{safe}.json"
+
+
+def write_private(path: Path, text: str) -> None:
+    """Write *text* to *path* with mode 0600 (created that way, never world-readable)."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+    os.chmod(path, 0o600)
 
 
 def preset_names() -> list[str]:

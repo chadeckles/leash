@@ -4,16 +4,11 @@ The Leash CLI manages agents, policies, and audit logs from the terminal. It aut
 
 ## Installation
 
-The CLI ships with the Leash repo:
-
-```bash
-python3 -m sdk.cli --help
-```
-
-Or, if installed via pip:
+Install the CLI with the core package (`pip install leash`) or server extra (`uv tool install 'leash[server]'`):
 
 ```bash
 leash --help
+python -m leash --help
 ```
 
 ## Global Options
@@ -36,7 +31,7 @@ export LEASH_URL=http://my-leash:8000
 
 The CLI automatically registers a `cli-admin` agent and caches the token to `~/.leash/token.json` on first use. You don't need to run `init` unless you want a custom agent name.
 
-Registering the CLI's admin identity requires the server's **admin key**. When the CLI runs on the same host as the server it reads the key from `KEYS_DIR/admin.key` automatically. Otherwise, set `LEASH_ADMIN_KEY` (for Docker: `export LEASH_ADMIN_KEY=$(docker exec leash-server cat /app/.keys/admin.key)`).
+Registering the CLI's admin identity requires the server's **admin key**. When the CLI runs on the same host as the server it reads the key from `KEYS_DIR/admin.key` (default `~/.leash/keys/admin.key`) automatically. Otherwise, set `LEASH_ADMIN_KEY` (for Docker: `export LEASH_ADMIN_KEY=$(docker exec leash-server cat /data/keys/admin.key)`).
 
 ---
 
@@ -84,7 +79,7 @@ Output includes which policies immediately apply and how many allow/deny rules t
 
 If an agent with that name already exists, the CLI shows a warning with the existing agent's details. Use `--force` to refresh its token, or `leash agents delete <name>` to remove and re-create it.
 
-**Token saved to:** `~/.leash/<agent-name>.json`
+**Token saved to:** `~/.leash/agents/<agent-name>.json`
 
 ### agents list
 
@@ -186,21 +181,21 @@ Check policy YAML files for errors **before deploying**:
 
 ```bash
 # Single file
-leash policy validate app/policies/email_agent.yaml
+leash policy validate ~/.leash/policies/email_agent.yaml
 
 # All files in a directory
-leash policy validate app/policies/
+leash policy validate ~/.leash/policies/
 
 # Multiple paths
-leash policy validate my-policy.yaml app/policies/
+leash policy validate my-policy.yaml ~/.leash/policies/
 ```
 
 **Example output:**
 
 ```
-  ✔ app/policies/default.yaml
-  ✔ app/policies/email_agent.yaml
-  ✘ app/policies/broken.yaml
+  ✔ ~/.leash/policies/default.yaml
+  ✔ ~/.leash/policies/email_agent.yaml
+  ✘ ~/.leash/policies/broken.yaml
     → rules[1]: missing required field 'action'
     → rules[2]: invalid effect 'allow_maybe' (must be allow or deny)
 
@@ -230,7 +225,7 @@ leash policy test --action file.read --action file.write -f my-policy.yaml --age
 **Example output (dry-run):**
 
 ```
-  Dry-run against: app/policies/email_agent.yaml
+  Dry-run against: ~/.leash/policies/email_agent.yaml
   Agent: test-email-bot
   ──────────────────────────────────────────────────
   ✔ email.read                         → allow  Allowed by email-agent  [ASI02]
@@ -376,7 +371,7 @@ leash audit export --since 1h | jq '.decision'
 Each exported event includes:
 
 - `chain_intact` — whether the hash chain is valid for this entry
-- `signature` — the RSA signature (tamper-evidence travels with the data)
+- `signature` — the Ed25519 signature for new keys (legacy RSA signatures still verify)
 - `observation` — for observe-mode denials, what would have been blocked
 
 **Environment variables for automatic export:**
@@ -450,7 +445,7 @@ After generating, validate and customize:
 
 ```bash
 leash policy validate my-policy.yaml
-# Edit the YAML to your needs, then deploy to app/policies/
+# Edit the YAML to your needs, then deploy to ~/.leash/policies/
 ```
 
 ---
@@ -476,7 +471,7 @@ Shows real-time agent activity, authorize decisions, audit stats, and policy ove
 
 ### server rotate-keys
 
-Rotate the server's RSA signing key pair. The old key is retained so existing JWTs and audit signatures remain verifiable during the transition.
+Rotate the server signing key pair. New keys are Ed25519/EdDSA; legacy RSA/RS256 keys remain verifiable during the transition.
 
 ```bash
 leash server rotate-keys
@@ -517,7 +512,7 @@ Checks:
 
 ```bash
 # 1. Start Leash
-python3 -m uvicorn app.main:app --port 8000
+leash start
 
 # 2. Initialize CLI (auto on first command, but explicit is clearer)
 leash init
@@ -530,7 +525,7 @@ leash scan --generate-policy --save-policy my-policy.yaml -- npx -y @mcp/server-
 
 # 5. Validate and customize the generated policy
 leash policy validate my-policy.yaml
-# Edit to fit your needs, then: cp my-policy.yaml app/policies/
+# Edit to fit your needs, then: cp my-policy.yaml ~/.leash/policies/
 
 # 6. Register an agent
 leash agents register -n my-code-bot -v openai -t coding

@@ -1,46 +1,34 @@
-.PHONY: install run dev test lint fmt clean docker-up docker-down quickstart
+.PHONY: quickstart sync run dev test lint fmt build clean docker-up docker-down
 
-# ---------------------------------------------------------------------------
-# Local development
-# ---------------------------------------------------------------------------
+# Development uses uv (https://docs.astral.sh/uv/). End users install with:
+#   uv tool install 'leash[server]'
 
 quickstart:
 	@bash scripts/quickstart.sh
 
-install:
-	pip3 install -r requirements.txt
-	@echo ""
-	@echo "  To use 'leash' as a global command:"
-	@echo "    sudo ln -sf \$$PWD/leash /usr/local/bin/leash"
-	@echo "  Or: make install-cli"
-	@echo ""
-
-install-cli:
-	pip3 install -r requirements.txt
-	sudo ln -sf "$$PWD/leash" /usr/local/bin/leash
-	@echo "  ✔ leash command installed. Try: leash status"
+sync:
+	uv sync --all-extras
 
 run:
-	uvicorn app.main:app --host 0.0.0.0 --port 8000
+	uv run leash start
 
 dev:
-	uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+	uv run leash start --reload
 
 test:
-	pytest tests/ -v
+	uv run --all-extras pytest -v
 
 lint:
-	ruff check app/ tests/
+	uv run ruff check src/ tests/
 
 fmt:
-	ruff format app/ tests/
+	uv run ruff format src/ tests/
+
+build:
+	uv build
 
 clean:
-	rm -f leash.db
-	rm -rf .keys
-	rm -f ~/.leash/token.json
-	rm -f /usr/local/bin/leash 2>/dev/null || true
-	rm -rf .pytest_cache
+	rm -rf dist build .pytest_cache .ruff_cache
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
 # ---------------------------------------------------------------------------

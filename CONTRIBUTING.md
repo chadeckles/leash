@@ -9,38 +9,32 @@ Thanks for your interest in contributing! Leash is an open-source AI agent autho
 git clone https://github.com/chadeckles/leash.git
 cd leash
 
-# Create a virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
-
-# Install in editable mode (makes the 'leash' CLI command available)
-pip install -e .
+# Install all dependencies
+uv sync --all-extras
 
 # Run the test suite
-pytest -v
+uv run pytest
 
 # Start the server
-leash start --reload
+uv run leash start --reload
 ```
 
 ## Project Structure
 
 ```
 leash/
-├── app/                    # FastAPI server
-│   ├── main.py             # App entry point
-│   ├── core/               # Config, database, auth, crypto
-│   ├── identity/           # Agent registration & JWT
-│   ├── policy/             # Policy engine, validator, schemas
-│   ├── audit/              # Hash-chained audit trail
-│   ├── routes/             # API endpoints
-│   ├── models/             # SQLAlchemy models
-│   └── policies/           # Built-in YAML policies
-├── sdk/                    # Python SDK, CLI, MCP proxy
-│   ├── client.py           # LeashAgent class
+├── src/leash/              # Python package
+│   ├── __init__.py         # Public SDK exports
+│   ├── __main__.py         # python -m leash
 │   ├── cli.py              # CLI tool
+│   ├── client.py           # LeashAgent class
 │   ├── mcp_proxy.py        # MCP authorization proxy
-│   └── dashboard.py        # Terminal TUI dashboard
+│   ├── scanner.py          # Security surface scanner
+│   ├── dashboard.py        # Terminal TUI dashboard
+│   ├── paths.py            # LEASH_HOME/state paths
+│   ├── engine/             # Pure policy engine and validator
+│   ├── presets/            # Bundled YAML policies
+│   └── server/             # FastAPI server, routes, models, audit, identity
 ├── tests/                  # pytest test suite
 ├── docs/                   # MkDocs documentation site
 └── scripts/                # Helper scripts (quickstart, etc.)
@@ -64,13 +58,13 @@ git checkout -b feature/my-feature    # or fix/my-bugfix
 
 ```bash
 # Full suite
-pytest -v
+uv run pytest
 
 # Single file
-pytest tests/test_policy.py -v
+uv run pytest tests/test_policy.py -v
 
-# With coverage
-pytest --cov=app --cov=sdk -v
+# With coverage (if pytest-cov is installed)
+uv run pytest --cov=src/leash -v
 ```
 
 All tests must pass before submitting.
@@ -79,7 +73,7 @@ All tests must pass before submitting.
 
 ```bash
 # We use ruff for linting
-ruff check app/ sdk/ tests/
+uv run ruff check src/ tests/
 ```
 
 ### 5. Submit a PR
@@ -129,10 +123,10 @@ The `client`, `token`, and `agent_id` fixtures are defined in `tests/conftest.py
 
 ## Adding a Policy Example
 
-Built-in policies live in `app/policies/`. To add a new one:
+Bundled policy presets live in `src/leash/presets/`. To add a new one:
 
-1. Create a YAML file (e.g. `app/policies/my_agent.yaml`)
-2. Validate it: `python3 -m sdk.cli policy validate app/policies/my_agent.yaml`
+1. Create a YAML file (e.g. `src/leash/presets/my_agent.yaml`)
+2. Validate it: `uv run leash policy validate src/leash/presets/my_agent.yaml`
 3. Add a test in `test_policy.py` that exercises the policy
 4. Document it in the appropriate docs page
 

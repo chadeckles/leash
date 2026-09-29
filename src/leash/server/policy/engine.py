@@ -81,7 +81,11 @@ def _load_db_policies(db=None) -> List[Policy]:
             continue
         # DB-level fields override anything in the YAML body
         doc.update(name=row.name, priority=row.priority, _source="db", _db_id=row.id)
-        policy = compile_policy(doc, "db")
+        try:
+            policy = compile_policy(doc, "db")
+        except (AttributeError, TypeError, ValueError) as exc:
+            _logger.warning("Skipping invalid managed policy id=%s (%s): %s", row.id, row.name, exc)
+            continue
         with _db_cache_lock:
             _db_cache[row.id] = (key, policy)
         compiled.append(policy)

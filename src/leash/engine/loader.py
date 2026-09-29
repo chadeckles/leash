@@ -68,9 +68,16 @@ class PolicyDirectory:
             sig = self._current_signature()
             if sig == self._signature:
                 return
-            docs = load_policy_dir(self.path)
+            docs, compiled = [], []
+            for d in load_policy_dir(self.path):
+                try:
+                    compiled.append(compile_policy(d, "yaml"))
+                except (AttributeError, TypeError, ValueError) as exc:
+                    _logger.warning("Skipping invalid policy %s: %s", d.get("name", "?"), exc)
+                    continue
+                docs.append(d)
             self._docs = docs
-            self._compiled = [compile_policy(d, "yaml") for d in docs]
+            self._compiled = compiled
             self._signature = sig
 
     def invalidate(self) -> None:

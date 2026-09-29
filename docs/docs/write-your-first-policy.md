@@ -24,7 +24,7 @@ Policies are YAML files that tell Leash what an agent is allowed to do. This gui
 
 ## How Policies Work
 
-1. Policies live in `app/policies/` as `.yaml` files
+1. Policies live in `~/.leash/policies/` as `.yaml` files by default
 2. The server picks up changes automatically — no restart needed
 3. Policies are matched to agents by **name pattern**
 4. Rules are evaluated **top-to-bottom** — first match wins
@@ -41,7 +41,7 @@ Before writing any rules, register your agent and deploy a catch-all observe pol
 leash agents register --name my-agent
 ```
 
-Create `app/policies/my_agent_observe.yaml`:
+Create `~/.leash/policies/my_agent_observe.yaml`:
 
 ```yaml
 name: my-agent-observe
@@ -81,7 +81,7 @@ The scan reveals:
 Now you know what the agent actually does. Create your policy:
 
 ```yaml
-# app/policies/my_agent.yaml
+# ~/.leash/policies/my_agent.yaml
 name: my-agent-policy
 description: Basic policy for my agent
 priority: 10
@@ -206,7 +206,7 @@ rules:
 
 When the limit is hit, the action is denied with a clear message: *"Rate limit exceeded: 10/10 calls in the last 3600s window"*.
 
-Rate limits are **per-agent** — agent A and agent B each get their own counter.
+Rate limits are **per-agent** and enforced in memory by the engine at `/authorize` time with a sliding window. They reset on server restart, are not shared across multiple uvicorn workers, and post-execution `/audit` entries do not count toward limits.
 
 ## Conditions (ABAC)
 
@@ -267,10 +267,10 @@ Tags are returned in authorize responses and audit entries, making it easy to ge
 When multiple policies apply to an agent, the one with the **highest priority number** is evaluated first:
 
 ```yaml
-# app/policies/default.yaml (priority: 0)
+# ~/.leash/policies/default.yaml (priority: 0)
 # → catch-all deny — evaluated last
 
-# app/policies/my_agent.yaml (priority: 10)
+# ~/.leash/policies/my_agent.yaml (priority: 10)
 # → agent-specific allows — evaluated first
 ```
 
@@ -319,7 +319,7 @@ Before deploying, validate and test:
 
 ```bash
 # Check YAML structure
-leash policy validate app/policies/my_agent.yaml
+leash policy validate ~/.leash/policies/my_agent.yaml
 
 # Test a specific action against live policies
 leash policy test --action file.read --agent <agent-id>
@@ -337,7 +337,7 @@ curl -X POST http://localhost:8000/policies/dry-run \
 
 ## Real-World Examples
 
-Leash ships with policies for common agent types in `app/policies/`. Copy and adapt them:
+Leash seeds bundled policies for common agent types into `~/.leash/policies/` on first server start. Copy and adapt them:
 
 | File | Agent Type | What It Does |
 |------|-----------|-------------|
@@ -347,9 +347,9 @@ Leash ships with policies for common agent types in `app/policies/`. Copy and ad
 
 ```bash
 # Start from an existing policy:
-cp app/policies/email_agent.yaml app/policies/my_bot.yaml
+cp ~/.leash/policies/email_agent.yaml ~/.leash/policies/my_bot.yaml
 # Edit it for your agent's needs, then validate:
-leash policy validate app/policies/my_bot.yaml
+leash policy validate ~/.leash/policies/my_bot.yaml
 ```
 
 ### Scan-First Case Study: Agent-S

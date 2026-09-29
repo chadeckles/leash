@@ -2,11 +2,12 @@
 
 Quick start (zero config)::
 
-    python3 -m sdk.cli agents list     # auto-registers on first run!
+    leash start                        # run the server (needs `leash[server]`)
+    leash agents list                  # auto-registers on first run!
 
 Or initialize explicitly::
 
-    python3 -m sdk.cli init            # register + cache token
+    leash init                         # register + cache token
 
 Usage::
 
@@ -21,7 +22,7 @@ Usage::
 
     # Policy commands
     leash policy list
-    leash policy validate app/policies/
+    leash policy validate ~/.leash/policies/
     leash policy test --action email.send --agent my-agent-id
 
     # Audit commands
@@ -34,7 +35,7 @@ Usage::
     leash dashboard
 
 Requires a running Leash server (default http://localhost:8000).
-Token auto-cached to ~/.leash/token.json on first use.
+Token auto-cached to ~/.leash/token.json (under $LEASH_HOME) on first use.
 Override with --token or --token-file if needed.
 """
 
@@ -49,10 +50,19 @@ from pathlib import Path
 
 import httpx
 
+from leash import __version__, paths
+
 
 LEASH_URL = os.getenv("LEASH_URL", "http://localhost:8000")
-_TOKEN_DIR = Path.home() / ".leash"
-_TOKEN_FILE = _TOKEN_DIR / "token.json"
+_TOKEN_DIR = paths.leash_home()
+_TOKEN_FILE = paths.token_file()
+
+
+def _cached_identity_files():
+    """CLI and agent identity files (``~/.leash/*.json`` and ``~/.leash/agents/*.json``)."""
+    for d in (_TOKEN_DIR, paths.agents_dir()):
+        if d.is_dir():
+            yield from sorted(d.glob("*.json"))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -71,7 +81,7 @@ def _load_token(token: str | None, token_file: str | None) -> str | None:
     if token:
         return token
     if token_file:
-        p = Path(token_file)
+        p = Path(token_file).expanduser()
         if p.exists():
             data = json.loads(p.read_text())
             return data.get("token", "")
@@ -95,13 +105,11 @@ def _load_token(token: str | None, token_file: str | None) -> str | None:
 
 def _save_token(agent_id: str, token: str, name: str) -> None:
     """Cache identity to ~/.leash/token.json."""
-    _TOKEN_DIR.mkdir(parents=True, exist_ok=True)
-    _TOKEN_FILE.write_text(json.dumps({
+    paths.write_private(_TOKEN_FILE, json.dumps({
         "agent_id": agent_id,
         "token": token,
         "name": name,
     }, indent=2))
-    os.chmod(_TOKEN_FILE, 0o600)
 
 
 def _admin_key() -> str | None:
@@ -109,12 +117,11 @@ def _admin_key() -> str | None:
     key = os.getenv("LEASH_ADMIN_KEY", "").strip()
     if key:
         return key
+    key_file = paths.keys_dir() / "admin.key"
     try:
-        from leash.server.core.config import KEYS_DIR
-        key_file = Path(KEYS_DIR) / "admin.key"
         if key_file.exists():
             return key_file.read_text().strip()
-    except Exception:
+    except OSError:
         pass
     return None
 
@@ -148,16 +155,16 @@ def _auto_init(base_url: str, name: str = "cli-admin") -> str:
         resp.raise_for_status()
     except httpx.ConnectError:
         print(f"Error: Cannot reach Leash at {base_url}", file=sys.stderr)
-        print("  Start the server: python3 -m uvicorn app.main:app --port 8000", file=sys.stderr)
+        print("  Start the server: leash start   (install with: uv tool install 'leash[server]')", file=sys.stderr)
         sys.exit(1)
     except httpx.HTTPStatusError as e:
         print(f"Error: Registration failed ({e.response.status_code})", file=sys.stderr)
         if e.response.status_code in (401, 403):
             print(
                 "  The CLI registers as an admin and needs the server's admin key.\n"
-                "  Run the CLI on the server host (key is read from KEYS_DIR/admin.key),\n"
+                f"  Run the CLI on the server host (key is read from {paths.keys_dir() / 'admin.key'}),\n"
                 "  or set LEASH_ADMIN_KEY. For Docker:\n"
-                "    export LEASH_ADMIN_KEY=$(docker exec leash-server cat /app/.keys/admin.key)",
+                "    export LEASH_ADMIN_KEY=$(docker exec leash-server cat /data/keys/admin.key)",
                 file=sys.stderr,
             )
         sys.exit(1)
@@ -185,9 +192,7 @@ def _find_agent_token(agent_id: str) -> str | None:
     JWT rather than the CLI-admin token.  This helper resolves the correct
     token from the on-disk cache that ``agents register`` writes.
     """
-    if not _TOKEN_DIR.is_dir():
-        return None
-    for path in _TOKEN_DIR.glob("*.json"):
+    for path in _cached_identity_files():
         try:
             data = json.loads(path.read_text())
             if data.get("agent_id") == agent_id:
@@ -209,14 +214,13 @@ def _resolve_agent_id(client: httpx.Client, identifier: str) -> tuple[str, str |
         return identifier, _find_agent_token(identifier)
 
     # Try local cache first (fast, no network)
-    if _TOKEN_DIR.is_dir():
-        for path in _TOKEN_DIR.glob("*.json"):
-            try:
-                data = json.loads(path.read_text())
-                if data.get("name") == identifier:
-                    return data["agent_id"], data.get("token")
-            except (json.JSONDecodeError, KeyError):
-                continue
+    for path in _cached_identity_files():
+        try:
+            data = json.loads(path.read_text())
+            if data.get("name") == identifier:
+                return data["agent_id"], data.get("token")
+        except (json.JSONDecodeError, KeyError):
+            continue
 
     # Fall back to the API
     try:
@@ -258,7 +262,7 @@ def cmd_init(args: argparse.Namespace) -> None:
 
     name = args.name or "cli-admin"
     _auto_init(args.url, name=name)
-    print("\n  ✔ Ready! Try: python3 -m sdk.cli agents list\n", file=sys.stderr)
+    print("\n  ✔ Ready! Try: leash agents list\n", file=sys.stderr)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -330,7 +334,7 @@ def cmd_agents_register(args: argparse.Namespace) -> None:
         if existing:
             a = existing[0]
             aid = a["agent_id"]
-            token_path = _TOKEN_DIR / f"{args.name.replace(' ', '-')}.json"
+            token_path = paths.agent_identity_file(args.name)
 
             print(f"\n  ⚠  An agent named '{args.name}' is already registered.")
             print(f"  ID:      {aid}")
@@ -352,11 +356,9 @@ def cmd_agents_register(args: argparse.Namespace) -> None:
             rot_resp = rot_client.post(f"/agents/{aid}/rotate")
             if rot_resp.is_success:
                 agent_token = rot_resp.json()["token"]
-                _TOKEN_DIR.mkdir(parents=True, exist_ok=True)
-                token_path.write_text(
-                    json.dumps({"agent_id": aid, "token": agent_token, "name": args.name}, indent=2)
+                paths.write_private(
+                    token_path, json.dumps({"agent_id": aid, "token": agent_token, "name": args.name}, indent=2)
                 )
-                os.chmod(token_path, 0o600)
                 print(f"  ↻ Token refreshed for '{args.name}'")
                 print(f"  Token → {token_path}\n")
             else:
@@ -396,14 +398,12 @@ def cmd_agents_register(args: argparse.Namespace) -> None:
         pass
 
     # Save the new agent's token
-    token_path = _TOKEN_DIR / f"{args.name.replace(' ', '-')}.json"
-    _TOKEN_DIR.mkdir(parents=True, exist_ok=True)
-    token_path.write_text(
-        json.dumps({"agent_id": aid, "token": agent_token, "name": args.name}, indent=2)
+    token_path = paths.agent_identity_file(args.name)
+    paths.write_private(
+        token_path, json.dumps({"agent_id": aid, "token": agent_token, "name": args.name}, indent=2)
     )
-    os.chmod(token_path, 0o600)
     print(f"\n  Token saved \u2192 {token_path}")
-    print(f"  Use with SDK: LeashAgent(..., token_file='{token_path}')")
+    print(f"  Use with SDK: LeashAgent(name='{args.name}')  (picks up this identity automatically)")
     print()
 
 
@@ -460,7 +460,7 @@ def cmd_agents_deregister(args: argparse.Namespace) -> None:
 
     # ── clean up cached token file ──────────────────────────────────────
     removed_file = False
-    for path in _TOKEN_DIR.glob("*.json"):
+    for path in _cached_identity_files():
         try:
             data = json.loads(path.read_text())
             if data.get("agent_id") == agent_id:
@@ -563,7 +563,7 @@ def cmd_policy_list(args: argparse.Namespace) -> None:
     managed = data.get("policies", [])
 
     # Also show YAML policies by listing the directory
-    yaml_dir = Path(__file__).parent.parent / "app" / "policies"
+    yaml_dir = paths.policies_dir()
     yaml_policies: list[dict] = []
     if yaml_dir.exists():
         import yaml as _yaml
@@ -1072,8 +1072,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
 
     # ── 2. Server key age ──────────────────────────────────────────────────
     try:
-        from leash.server.core.config import KEYS_DIR
-        keys_path = Path(KEYS_DIR)
+        keys_path = paths.keys_dir()
         priv_key = keys_path / "server_private.pem"
         if priv_key.exists():
             key_stat = priv_key.stat()
@@ -1197,8 +1196,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     # ── 7. Policy YAML validation (local files) ───────────────────────────
     try:
         from leash.engine.validator import validate_policy_yaml
-        from leash.server.core.config import POLICIES_DIR
-        policy_dir = Path(POLICIES_DIR)
+        policy_dir = paths.policies_dir()
         if policy_dir.exists():
             errors = []
             yaml_files = list(policy_dir.glob("*.yaml")) + list(policy_dir.glob("*.yml"))
@@ -1268,7 +1266,14 @@ def _print_doctor(checks: list[dict], args: argparse.Namespace) -> None:
 
 def cmd_server(args: argparse.Namespace) -> None:
     """Start the Leash server (uvicorn)."""
-    import uvicorn
+    try:
+        import uvicorn
+        import fastapi  # noqa: F401
+    except ImportError:
+        print("  ✘ The Leash server isn't installed. Install it with:\n"
+              "      uv tool install 'leash[server]'      (or: pip install 'leash[server]')",
+              file=sys.stderr)
+        sys.exit(1)
 
     host = args.host
     port = args.port
@@ -1279,6 +1284,7 @@ def cmd_server(args: argparse.Namespace) -> None:
         print("  ↻  Auto-reload enabled (watching for file changes)")
     print(f"  📄 API docs at http://{host}:{port}/docs")
     print(f"  📊 Dashboard at http://{host}:{port}/dashboard")
+    print(f"  📁 Policies in {paths.policies_dir()}  (state: {paths.leash_home()})")
     print()
 
     uvicorn.run(
@@ -1352,6 +1358,7 @@ def main() -> None:
         prog="leash",
         description="Leash CLI – AI agent governance from the command line",
     )
+    parser.add_argument("--version", action="version", version=f"leash {__version__}")
     parser.add_argument("--url", default=LEASH_URL, help="Leash server URL")
     parser.add_argument("--token", help="JWT token for authentication")
     parser.add_argument("--token-file", help="Path to JSON file with 'token' field")
@@ -1448,7 +1455,8 @@ def main() -> None:
 
     # ── server (aliased as 'start') ──
     server_p = sub.add_parser("start", help="Start the Leash server")
-    server_p.add_argument("--host", default="0.0.0.0", help="Bind address (default: 0.0.0.0)")
+    server_p.add_argument("--host", default=os.getenv("HOST", "127.0.0.1"),
+                          help="Bind address (default: 127.0.0.1; use 0.0.0.0 to expose on the network)")
     server_p.add_argument("--port", "-p", type=int, default=8000, help="Port (default: 8000)")
     server_p.add_argument("--reload", action="store_true", help="Auto-reload on code changes (development)")
 

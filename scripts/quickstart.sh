@@ -3,8 +3,10 @@
 # Gets you from zero to a working demo in one command:
 #   make quickstart
 #
+# Runs against a throwaway LEASH_HOME, so your ~/.leash is never touched.
+#
 # What it does:
-#   1. Installs dependencies
+#   1. Installs dependencies (uv if available, else pip)
 #   2. Starts the Leash server (background)
 #   3. Waits for it to be healthy
 #   4. Registers a demo agent
@@ -58,23 +60,29 @@ banner
 # ── 1. Install dependencies ──────────────────────────────────────────────────
 
 step 1 "Installing dependencies..."
-pip3 install -q -r requirements.txt 2>/dev/null
+if command -v uv >/dev/null 2>&1; then
+    uv sync -q --extra server
+    LEASH_CMD=(uv run -q leash)
+else
+    python3 -m pip install -q -e ".[server]"
+    LEASH_CMD=(python3 -m leash)
+fi
 ok "Dependencies installed"
 
 # ── 2. Start server ─────────────────────────────────────────────────────────
 
 step 2 "Starting Leash server..."
 
-# Kill any existing Leash server on port 8000
-lsof -ti:8000 2>/dev/null | xargs kill -9 2>/dev/null || true
-sleep 0.5
+if curl -sf "$LEASH_URL/health" > /dev/null 2>&1; then
+    fail "Something is already running at $LEASH_URL — stop it first (or set LEASH_URL)"
+    exit 1
+fi
 
-# Clean slate (fresh DB for demo)
-rm -f leash.db
+# Clean slate: fresh DB, keys and preset policies in a temp directory
+export LEASH_HOME="$(mktemp -d -t leash-quickstart)"
+PORT="${LEASH_URL##*:}"
 
-uvicorn_cmd="python3 -m uvicorn"
-
-$uvicorn_cmd app.main:app --host 0.0.0.0 --port 8000 --log-level warning &
+"${LEASH_CMD[@]}" start --port "$PORT" > "$LEASH_HOME/server.log" 2>&1 &
 SERVER_PID=$!
 
 # Wait for healthy
@@ -94,6 +102,7 @@ done
 # Cleanup on exit
 cleanup() {
     kill $SERVER_PID 2>/dev/null || true
+    rm -rf "$LEASH_HOME"
 }
 trap cleanup EXIT
 
@@ -165,7 +174,7 @@ step 6 "You're up and running!"
 
 echo ""
 echo -e "${BOLD}  What just happened:${RESET}"
-echo -e "  • Leash evaluated each action against YAML policies in ${CYAN}app/policies/${RESET}"
+echo -e "  • Leash evaluated each action against YAML policies in ${CYAN}$LEASH_HOME/policies/${RESET}"
 echo -e "  • demo_agent_policy matched because the agent name contains 'demo'"
 echo -e "  • read_file, summarize, write_file → ${GREEN}allowed${RESET}"
 echo -e "  • delete_file → ${RED}denied${RESET} (explicit deny rule)"
@@ -175,12 +184,12 @@ echo ""
 echo -e "${BOLD}  Next steps:${RESET}"
 echo -e "  ${CYAN}1.${RESET} Open the dashboard    → ${BOLD}$LEASH_URL/dashboard${RESET}"
 echo -e "  ${CYAN}2.${RESET} Explore the API docs  → ${BOLD}$LEASH_URL/docs${RESET}"
-echo -e "  ${CYAN}3.${RESET} Edit a policy          → ${BOLD}app/policies/demo_agent.yaml${RESET}"
+echo -e "  ${CYAN}3.${RESET} Edit a policy          → ${BOLD}$LEASH_HOME/policies/demo_agent.yaml${RESET} (reloads live)"
 echo -e "  ${CYAN}4.${RESET} Try the CLI            → ${BOLD}leash agents list${RESET}"
-echo -e "  ${CYAN}5.${RESET} Write your own policy  → ${BOLD}cp app/policies/email_agent.yaml app/policies/my_agent.yaml${RESET}"
+echo -e "  ${CYAN}5.${RESET} For real use           → ${BOLD}uv tool install 'leash[server]' && leash start${RESET} (state in ~/.leash)"
 echo ""
 echo -e "${DIM}  Server is running in the background (PID $SERVER_PID).${RESET}"
-echo -e "${DIM}  Press Ctrl+C to stop, or run: kill $SERVER_PID${RESET}"
+echo -e "${DIM}  Press Ctrl+C to stop; the demo state in $LEASH_HOME is deleted on exit.${RESET}"
 echo ""
 
 # Keep server running so user can explore

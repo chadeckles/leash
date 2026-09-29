@@ -9,23 +9,36 @@ import logging
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from pathlib import Path
 
 import jwt
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives.asymmetric import ed25519, padding, rsa
 
-from leash.server.core.config import ADMIN_KEY, JWT_ALGORITHM, JWT_EXPIRATION_HOURS, JWT_ISSUER, KEYS_DIR
+from leash.server.core.config import ADMIN_KEY, JWT_EXPIRATION_HOURS, JWT_ISSUER, KEYS_DIR
 
 _logger = logging.getLogger("leash.security")
 
 # ---------------------------------------------------------------------------
-# RSA key-pair helpers
+# Key-pair helpers
+#
+# New keys are Ed25519 (fast signing, small keys).  RSA keys created by
+# Leash <= 0.3 are still loaded and used with RS256 / PKCS#1 v1.5 until the
+# operator runs ``leash server rotate-keys``.
 # ---------------------------------------------------------------------------
 
+def generate_keypair() -> "tuple[bytes, bytes]":
+    """Return (private_pem, public_pem) for a new Ed25519 key."""
+    return _pem_pair(ed25519.Ed25519PrivateKey.generate())
+
+
 def generate_rsa_keypair() -> "tuple[bytes, bytes]":
-    """Return (private_pem, public_pem) for a new 2048-bit RSA key."""
-    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    """Return (private_pem, public_pem) for a new 2048-bit RSA key (legacy)."""
+    return _pem_pair(rsa.generate_private_key(public_exponent=65537, key_size=2048))
+
+
+def _pem_pair(private_key) -> "tuple[bytes, bytes]":
     private_pem = private_key.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
@@ -64,7 +77,7 @@ def _ensure_server_keys() -> "tuple[bytes, bytes]":
         return _cached_keys
 
     keys_path = Path(KEYS_DIR)
-    keys_path.mkdir(parents=True, exist_ok=True)
+    keys_path.mkdir(mode=0o700, parents=True, exist_ok=True)
     priv_path = keys_path / "server_private.pem"
     pub_path = keys_path / "server_public.pem"
     prev_pub_path = keys_path / "server_public.prev.pem"
@@ -77,13 +90,18 @@ def _ensure_server_keys() -> "tuple[bytes, bytes]":
         _cached_keys = (priv_path.read_bytes(), pub_path.read_bytes())
         return _cached_keys
 
-    priv, pub = generate_rsa_keypair()
-    priv_path.write_bytes(priv)
+    priv, pub = generate_keypair()
+    _write_private(priv_path, priv)
     pub_path.write_bytes(pub)
-    # Restrict permissions on private key
-    os.chmod(priv_path, 0o600)
     _cached_keys = (priv, pub)
     return _cached_keys
+
+
+def _write_private(path: Path, data: bytes) -> None:
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+    os.chmod(path, 0o600)
 
 
 def rotate_server_keys() -> dict:
@@ -108,7 +126,7 @@ def rotate_server_keys() -> dict:
     global _cached_keys, _cached_prev_pub
 
     keys_path = Path(KEYS_DIR)
-    keys_path.mkdir(parents=True, exist_ok=True)
+    keys_path.mkdir(mode=0o700, parents=True, exist_ok=True)
     priv_path = keys_path / "server_private.pem"
     pub_path = keys_path / "server_public.pem"
     prev_priv_path = keys_path / "server_private.prev.pem"
@@ -124,10 +142,9 @@ def rotate_server_keys() -> dict:
         pub_path.rename(prev_pub_path)
 
     # 2. Generate new
-    priv, pub = generate_rsa_keypair()
-    priv_path.write_bytes(priv)
+    priv, pub = generate_keypair()
+    _write_private(priv_path, priv)
     pub_path.write_bytes(pub)
-    os.chmod(priv_path, 0o600)
 
     # 3. Update caches
     _cached_prev_pub = old_pub_bytes
@@ -173,6 +190,7 @@ def get_server_key_info() -> dict:
         info["age_days"] = age_days
         info["permissions"] = oct(stat.st_mode & 0o777)
         info["needs_rotation"] = age_days > 90
+        info["algorithm"] = key_algorithm()
     info["has_previous_key"] = prev_pub_path.exists()
     return info
 
@@ -201,7 +219,7 @@ def get_admin_key() -> str:
     path = get_admin_key_path()
     if path.exists():
         return path.read_text().strip()
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     key = secrets.token_urlsafe(32)
     try:
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -224,6 +242,27 @@ def verify_admin_key(candidate: "str | None") -> bool:
 # JWT helpers
 # ---------------------------------------------------------------------------
 
+@lru_cache(maxsize=8)
+def _private_key(pem: bytes):
+    return serialization.load_pem_private_key(pem, password=None)
+
+
+@lru_cache(maxsize=8)
+def _public_key(pem: bytes):
+    return serialization.load_pem_public_key(pem)
+
+
+def _jwt_algorithm(key) -> str:
+    if isinstance(key, (ed25519.Ed25519PrivateKey, ed25519.Ed25519PublicKey)):
+        return "EdDSA"
+    return "RS256"
+
+
+def key_algorithm() -> str:
+    """JWT algorithm of the current server key (``EdDSA`` or legacy ``RS256``)."""
+    return _jwt_algorithm(_public_key(get_server_public_key()))
+
+
 def create_agent_token(agent_id: str, name: str, agent_type: str = "", token_version: int = 1) -> str:
     """Create a signed JWT for an agent."""
     now = datetime.now(timezone.utc)
@@ -236,62 +275,54 @@ def create_agent_token(agent_id: str, name: str, agent_type: str = "", token_ver
         "iat": now,
         "exp": now + timedelta(hours=JWT_EXPIRATION_HOURS),
     }
-    return jwt.encode(payload, get_server_private_key(), algorithm=JWT_ALGORITHM)
+    key = _private_key(get_server_private_key())
+    return jwt.encode(payload, key, algorithm=_jwt_algorithm(key))
 
 
 def verify_agent_token(token: str) -> dict:
     """Decode and verify a JWT against the current server key.
 
-    Falls back to the **previous** server public key if the current key
-    fails verification.  This enables graceful server key rotation:
-    existing JWTs remain valid during the transition window.
+    Falls back to the **previous** server public key so tokens stay valid
+    during a key rotation.  Each key only accepts its own algorithm.
 
     Raises ``jwt.PyJWTError`` if neither key can verify the token.
     """
-    try:
-        return jwt.decode(
-            token,
-            get_server_public_key(),
-            algorithms=[JWT_ALGORITHM],
-            issuer=JWT_ISSUER,
-        )
-    except jwt.PyJWTError:
-        prev_key = get_server_previous_public_key()
-        if prev_key is not None:
-            # Try previous key — allows graceful transition
-            return jwt.decode(
-                token,
-                prev_key,
-                algorithms=[JWT_ALGORITHM],
-                issuer=JWT_ISSUER,
-            )
-        raise  # no previous key, propagate the original error
+    error: "jwt.PyJWTError | None" = None
+    for pem in (get_server_public_key(), get_server_previous_public_key()):
+        if pem is None:
+            continue
+        key = _public_key(pem)
+        try:
+            return jwt.decode(token, key, algorithms=[_jwt_algorithm(key)], issuer=JWT_ISSUER)
+        except jwt.PyJWTError as exc:
+            error = error or exc
+    raise error or jwt.InvalidTokenError("No server key available")
+
+
+def _canonical(data: dict) -> bytes:
+    return json.dumps(data, sort_keys=True, default=str).encode()
 
 
 def verify_signature(data: dict, signature_hex: str) -> bool:
-    """Verify an RSA-SHA256 hex signature against the server's public key.
+    """Verify a hex signature over *data* with the current or previous server key.
 
-    Falls back to the previous public key if the current key fails,
-    so audit entries signed before a server key rotation remain
-    verifiable.
-
-    Returns True if the signature is valid, False otherwise.
+    Accepts Ed25519 and legacy RSA-SHA256 (PKCS#1 v1.5) signatures, so audit
+    entries signed before a key rotation remain verifiable.
     """
-    canonical = json.dumps(data, sort_keys=True, default=str).encode()
-    sig_bytes = bytes.fromhex(signature_hex)
-
-    # Try current key first
-    for pub_pem in (get_server_public_key(), get_server_previous_public_key()):
-        if pub_pem is None:
+    canonical = _canonical(data)
+    try:
+        sig_bytes = bytes.fromhex(signature_hex)
+    except ValueError:
+        return False
+    for pem in (get_server_public_key(), get_server_previous_public_key()):
+        if pem is None:
             continue
-        public_key = serialization.load_pem_public_key(pub_pem)
+        key = _public_key(pem)
         try:
-            public_key.verify(  # type: ignore[union-attr]
-                sig_bytes,
-                canonical,
-                padding.PKCS1v15(),
-                hashes.SHA256(),
-            )
+            if isinstance(key, ed25519.Ed25519PublicKey):
+                key.verify(sig_bytes, canonical)
+            else:
+                key.verify(sig_bytes, canonical, padding.PKCS1v15(), hashes.SHA256())  # type: ignore[union-attr]
             return True
         except Exception:
             continue
@@ -303,15 +334,11 @@ def verify_signature(data: dict, signature_hex: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def sign_data(data: dict) -> str:
-    """Produce an RSA-SHA256 hex signature over the canonical JSON of *data*."""
-    canonical = json.dumps(data, sort_keys=True, default=str).encode()
-    private_key = serialization.load_pem_private_key(get_server_private_key(), password=None)
-    signature = private_key.sign(  # type: ignore[union-attr]
-        canonical,
-        padding.PKCS1v15(),
-        hashes.SHA256(),
-    )
-    return signature.hex()
+    """Sign the canonical JSON of *data* with the server key; returns hex."""
+    key = _private_key(get_server_private_key())
+    if isinstance(key, ed25519.Ed25519PrivateKey):
+        return key.sign(_canonical(data)).hex()
+    return key.sign(_canonical(data), padding.PKCS1v15(), hashes.SHA256()).hex()  # type: ignore[union-attr]
 
 
 def hash_data(data: dict) -> str:

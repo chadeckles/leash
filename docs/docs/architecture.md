@@ -29,7 +29,7 @@ How Leash works under the hood.
 │  │ Identity  │    │ Policy Engine │    │   Audit Service   │    │
 │  │ Service   │    │               │    │                   │    │
 │  │           │    │  YAML + DB    │    │  Hash-chained     │    │
-│  │  JWT/RS256│    │  policies     │    │  append-only log  │    │
+│  │  JWT/EdDSA│    │  policies     │    │  append-only log  │    │
 │  │  key      │    │  ─────────    │    │  ───────────────  │    │
 │  │  rotation │    │  Wildcards    │    │  Tamper detection │    │
 │  │           │    │  ABAC         │    │  Chain scanning   │    │
@@ -70,7 +70,7 @@ The SDK sends a request to Leash:
 
 The server validates the JWT token:
 
-- Token must be signed with the server's RSA key
+- Token must be signed with the server's Ed25519 key (or a legacy RSA key from ≤0.3)
 - Token must not be expired
 - Issuer must be `leash`
 - The `sub` claim must match the `agent_id`
@@ -133,14 +133,14 @@ The SDK receives the decision and either executes the function or blocks it:
 
 ## Module Breakdown
 
-### Identity Service (`app/identity/`)
+### Identity Service (`src/leash/server/identity/`)
 
 Handles agent registration and authentication.
 
 | Concept | Implementation |
 |---------|---------------|
-| Agent identity | UUID + RSA key pair per agent |
-| Authentication | JWT signed with RS256 (server key) |
+| Agent identity | UUID + Ed25519 key pair per agent |
+| Authentication | JWT signed with EdDSA (server key); legacy RS256 tokens still verify until rotation |
 | Token expiry | Configurable (default: 168 hours / 7 days) |
 | Key rotation | `POST /agents/{id}/rotate` → new key pair + new JWT |
 | Storage | SQLite — agent name, vendor, type, tags, public key |
@@ -169,22 +169,24 @@ Handles agent registration and authentication.
 | `iat` | Issued-at timestamp |
 | `exp` | Expiration (default: 7 days from issuance) |
 
-### Policy Engine (`app/policy/`)
+### Policy Engine (`src/leash/engine/`, server adapter in `src/leash/server/policy/`)
 
 Evaluates allow/deny decisions against YAML and database policies.
 
 | Concept | Implementation |
 |---------|---------------|
-| Policy sources | YAML files on disk + managed policies in DB |
+| Policy sources | YAML files on disk (default `~/.leash/policies/`) + managed policies in DB |
 | Merge strategy | DB policies override YAML policies with same name |
 | Priority | Higher number = evaluated first |
 | Agent matching | `fnmatch` patterns (`*email*`, `bot-?`) |
 | Action matching | `fnmatch` patterns (`email.*`, `file.read`) |
 | Resource matching | `fnmatch` with path traversal detection |
 | ABAC conditions | Key-value checks against request context |
-| Rate limiting | Per-agent, per-rule, sliding window |
+| Rate limiting | Per-agent, per-rule, in-memory sliding window counted at `/authorize` time |
 | Observe mode | `mode: observe` — log would-be denials, never block |
 | Default | Deny (no matching rule = denied) |
+
+The pure `leash.engine` library (`PolicyEngine`, `PolicyDirectory`, `InMemoryRateLimiter`, `validate_policy_yaml`, etc.) has no FastAPI, SQLAlchemy, or HTTP dependencies. The server, CLI, and scanner share it for policy loading, validation, matching, and in-memory rate limiting. YAML directories are compiled and cached, then re-scanned at most once per second. Post-execution `/audit` entries do not count toward rate limits, and counters are per server process.
 
 **Policy evaluation order:**
 
@@ -201,7 +203,7 @@ Evaluates allow/deny decisions against YAML and database policies.
 3. No match found → deny (default)
 ```
 
-### Audit Service (`app/audit/`)
+### Audit Service (`src/leash/server/audit/`)
 
 Append-only, hash-chained audit trail.
 
@@ -209,7 +211,7 @@ Append-only, hash-chained audit trail.
 |---------|---------------|
 | Storage | SQLite — one row per authorize decision |
 | Hash chain | Each entry includes SHA-256 of the previous entry |
-| Signatures | RSA signature on entry data (server key) |
+| Signatures | Ed25519 signature on entry data (server key); legacy RSA signatures still verify |
 | Auto-logging | Every `/authorize` call is logged automatically |
 | Chain detection | Pattern matching for suspicious multi-action sequences |
 | Security scan | 5-check audit scan: integrity, chains, deny storms, observe shadows, permission gaps |
@@ -226,7 +228,7 @@ Append-only, hash-chained audit trail.
 | `privesc` | config.read → admin.* | Privilege escalation |
 | `prompt-inject` | prompt.* → code.execute | Injection attack |
 
-### MCP Proxy (`sdk/mcp_proxy.py`)
+### MCP Proxy (`src/leash/mcp_proxy.py`)
 
 Authorization layer for Model Context Protocol servers.
 
@@ -237,7 +239,7 @@ Authorization layer for Model Context Protocol servers.
 | Tool poisoning | Detects tool description changes between sessions |
 | Action naming | MCP tool name is used directly as the Leash action (1:1, no transformation) |
 
-### Security Scanner (`sdk/scanner.py`)
+### Security Scanner (`src/leash/scanner.py`)
 
 Discovery and risk classification for MCP server tool surfaces.
 
@@ -253,7 +255,7 @@ Discovery and risk classification for MCP server tool surfaces.
 
 ## Data Model
 
-### Agent (`app/models/agent.py`)
+### Agent (`src/leash/server/models/agent.py`)
 
 ```
 agents
@@ -263,14 +265,14 @@ agents
 ├── agent_type    String (nullable)
 ├── description   Text (nullable)
 ├── tags          JSON (list of strings)
-├── public_key    Text (RSA PEM)
+├── public_key    Text (Ed25519 PEM; legacy RSA PEM may exist)
 ├── token_version Integer (bump to revoke JWTs)
 ├── created_at    DateTime
 ├── updated_at    DateTime
 └── last_seen_at  DateTime
 ```
 
-### Policy (`app/models/policy.py`)
+### Policy (`src/leash/server/models/policy.py`)
 
 ```
 policies
@@ -283,7 +285,7 @@ policies
 └── updated_at    DateTime
 ```
 
-### Audit Entry (`app/models/audit.py`)
+### Audit Entry (`src/leash/server/models/audit.py`)
 
 ```
 audit_entries
@@ -295,7 +297,7 @@ audit_entries
 ├── outputs         JSON (nullable)
 ├── policy_decision String ("allow" or "deny")
 ├── prev_hash       String (SHA-256 of prior entry)
-└── signature       Text (RSA signature)
+└── signature       Text (Ed25519 or legacy RSA signature)
 ```
 
 ---
@@ -306,15 +308,15 @@ audit_entries
 
 | What | Algorithm | Key Size |
 |------|-----------|----------|
-| JWT signing | RS256 (RSA + SHA-256) | 2048-bit |
-| Audit signatures | RSA-PSS + SHA-256 | 2048-bit (server key) |
+| JWT signing | EdDSA (Ed25519); legacy RS256 verifies | 256-bit Ed25519; legacy 2048-bit RSA |
+| Audit signatures | Ed25519; legacy RSA PKCS#1 v1.5 verifies | 256-bit Ed25519; legacy 2048-bit RSA |
 | Hash chain | SHA-256 | 256-bit |
 
 ### Key Management
 
-- **Server key pair** — generated on first startup, stored in `.keys/` directory
-- **Server key rotation** — `POST /admin/rotate-server-keys` generates a new server key pair; the previous key is retained for graceful JWT/signature fallback
-- **Agent key pairs** — generated on registration, public key stored in DB
+- **Server key pair** — generated on first startup, stored in `~/.leash/keys/` by default (`KEYS_DIR` overrides)
+- **Server key rotation** — `POST /admin/rotate-server-keys` generates a new Ed25519 server key pair; the previous key is retained for graceful JWT/signature fallback
+- **Agent key pairs** — Ed25519 pairs generated on registration, public key stored in DB
 - **Private key permissions** — `0600` (owner read/write only)
 - **Agent key rotation** — `POST /agents/{id}/rotate` generates new key pair + JWT, bumps `token_version` to revoke old tokens
 - **Token version** — server-side revocation; every JWT carries a `tv` claim checked against the agent's `token_version` column
@@ -348,6 +350,41 @@ Leash maps to the [OWASP Agentic Security Initiative](https://owasp.org/www-proj
 | ASI09 | Human-Agent Trust | Signed audit trail, deny-stops-execution |
 
 ---
+
+
+## Project Layout
+
+```
+src/leash/
+├── __init__.py
+├── __main__.py
+├── cli.py
+├── client.py
+├── dashboard.py
+├── mcp_proxy.py
+├── scanner.py
+├── paths.py
+├── engine/
+│   ├── core.py
+│   ├── loader.py
+│   ├── matching.py
+│   ├── ratelimit.py
+│   └── validator.py
+├── presets/
+│   ├── default.yaml
+│   ├── demo_agent.yaml
+│   ├── email_agent.yaml
+│   └── openclaw.yaml
+└── server/
+    ├── main.py
+    ├── core/
+    ├── audit/
+    ├── identity/
+    ├── models/
+    ├── policy/
+    ├── routes/
+    └── static/
+```
 
 ## API Endpoints
 

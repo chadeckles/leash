@@ -39,6 +39,25 @@ import httpx
 
 logger = logging.getLogger("leash.sdk")
 
+DEFAULT_URL = "http://localhost:8000"
+_DEFAULT_TOKEN_FILE = object()
+_LEGACY_TOKEN_FILE = Path(".leash_identity.json")
+
+
+def _default_token_file(name: str) -> Path:
+    """``~/.leash/agents/<name>.json``; falls back to a pre-0.4
+    ``./.leash_identity.json`` belonging to the same agent name."""
+    from leash import paths
+
+    path = paths.agent_identity_file(name)
+    if not path.exists() and _LEGACY_TOKEN_FILE.exists():
+        try:
+            if json.loads(_LEGACY_TOKEN_FILE.read_text()).get("name") == name:
+                return _LEGACY_TOKEN_FILE
+        except (OSError, ValueError):
+            pass
+    return path
+
 
 class LeashDenied(PermissionError):
     """Raised when Leash denies an action."""
@@ -85,7 +104,7 @@ class LeashAgent:
     Parameters
     ----------
     base_url:
-        Leash server URL (e.g. ``http://localhost:8000``).
+        Leash server URL.  Defaults to ``$LEASH_URL`` or ``http://localhost:8000``.
     name:
         Human-readable agent name used for registration.
     vendor:
@@ -95,8 +114,9 @@ class LeashAgent:
     tags:
         Optional list of tags for grouping.
     token_file:
-        Path to cache the agent identity on disk.  Pass ``None`` to skip
-        caching (useful in tests or ephemeral environments).
+        Path to cache the agent identity on disk.  Defaults to
+        ``~/.leash/agents/<name>.json`` (under ``LEASH_HOME``).  Pass ``None``
+        to skip caching (useful in tests or ephemeral environments).
     auto_register:
         If ``True`` (default), the agent registers with Leash on first
         use.  Set to ``False`` and call :meth:`connect` manually if you
@@ -110,22 +130,24 @@ class LeashAgent:
 
     def __init__(
         self,
-        base_url: str = "http://localhost:8000",
+        base_url: Optional[str] = None,
         *,
         name: str = "leash-agent",
         vendor: Optional[str] = None,
         agent_type: Optional[str] = None,
         tags: Optional[List[str]] = None,
-        token_file: Optional[str | Path] = ".leash_identity.json",
+        token_file: Optional[str | Path] | object = _DEFAULT_TOKEN_FILE,
         auto_register: bool = True,
         fail_closed: bool = True,
     ):
-        self.base_url = base_url.rstrip("/")
+        self.base_url = (base_url or os.getenv("LEASH_URL") or DEFAULT_URL).rstrip("/")
         self.name = name
         self.vendor = vendor
         self.agent_type = agent_type
         self.tags = tags or []
-        self.token_file = Path(token_file) if token_file else None
+        if token_file is _DEFAULT_TOKEN_FILE:
+            token_file = _default_token_file(name)
+        self.token_file = Path(token_file).expanduser() if token_file else None
         self._auto_register = auto_register
         self.fail_closed = fail_closed
 

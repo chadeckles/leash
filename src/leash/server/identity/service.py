@@ -8,7 +8,7 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
-from leash.server.core.security import create_agent_token, generate_rsa_keypair
+from leash.server.core.security import create_agent_token, generate_keypair
 from leash.server.models.agent import Agent
 from leash.server.identity.schemas import (
     ActionCount,
@@ -79,7 +79,7 @@ def create_agent(
         )
 
     agent_id = str(uuid.uuid4())
-    private_pem, public_pem = generate_rsa_keypair()
+    private_pem, public_pem = generate_keypair()
 
     agent = Agent(
         id=agent_id,
@@ -211,7 +211,7 @@ def rotate_keys(db: Session, agent_id: str) -> Optional[KeyRotationResponse]:
     if agent is None:
         return None
 
-    private_pem, public_pem = generate_rsa_keypair()
+    private_pem, public_pem = generate_keypair()
     agent.public_key = public_pem.decode()
     agent.token_version = (agent.token_version or 0) + 1
     agent.updated_at = datetime.now(timezone.utc)

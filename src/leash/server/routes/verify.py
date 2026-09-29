@@ -19,7 +19,7 @@ router = APIRouter(tags=["Verification"])
 
 class VerifyRequest(BaseModel):
     data: Dict[str, Any] = Field(..., description="The original data dict that was signed")
-    signature: str = Field(..., description="Hex-encoded RSA-SHA256 signature to verify")
+    signature: str = Field(..., description="Hex-encoded Ed25519 (or legacy RSA-SHA256) signature to verify")
 
 
 class VerifyResponse(BaseModel):
@@ -38,7 +38,7 @@ class AuditChainResponse(BaseModel):
 
 @router.post("/verify", response_model=VerifyResponse)
 def verify(body: VerifyRequest):
-    """Verify an RSA-SHA256 signature against the server's public key.
+    """Verify an Ed25519 (or legacy RSA-SHA256) signature against the server's public key.
 
     This endpoint is intentionally **unauthenticated** so that any third
     party can verify a signature produced by Leash without needing a JWT.

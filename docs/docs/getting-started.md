@@ -5,16 +5,18 @@ Get Leash running and see it make allow/deny decisions in under 2 minutes.
 ## Prerequisites
 
 - Python 3.11+ (macOS ships with 3.9 — run `brew install python@3.12` first if needed)
-- pip
+- uv (recommended for source installs) or pip/pipx
 
-## Option 1: pip install (Recommended)
+## Option 1: Install the server + CLI (Recommended)
 
 ```bash
-pip install leash
+uv tool install 'leash[server]'
 leash start
 ```
 
-Server starts on http://localhost:8000. Open **http://localhost:8000/docs** for interactive API docs.
+Alternatives: `pipx install 'leash[server]'` or `pip install 'leash[server]'`.
+
+Server starts on http://127.0.0.1:8000. Open **http://localhost:8000/docs** for interactive API docs. Use `leash start --host 0.0.0.0` only when you need network exposure.
 
 ## Option 2: One Command (from source)
 
@@ -24,7 +26,7 @@ cd leash
 make quickstart
 ```
 
-This installs dependencies, starts the server, registers a demo agent, runs allow/deny decisions against built-in policies, and shows you the audit trail. You'll see output like:
+This uses a throwaway `LEASH_HOME`, starts the server, registers a demo agent, runs allow/deny decisions against built-in policies, and shows you the audit trail. You'll see output like:
 
 ```
 [3/6] Registering a demo agent...
@@ -47,13 +49,13 @@ After it finishes, open **http://localhost:8000/dashboard** to see the live dash
 ```bash
 git clone https://github.com/chadeckles/leash.git
 cd leash
-pip install -e .     # installs deps + makes 'leash' CLI available
+uv sync --all-extras
 ```
 
 Start the server:
 
 ```bash
-leash start --reload     # or: make dev
+uv run leash start --reload     # or: make dev
 ```
 
 In a separate terminal, register an agent and test a decision:
@@ -85,11 +87,16 @@ You'll get a `"decision": "deny"` — because no policy allows `read_file` for a
 make docker-up
 ```
 
-Server runs at http://localhost:8000. Stop with `make docker-down`.
+Server binds to 127.0.0.1:8000 by default. The image uses `LEASH_HOME=/data` with one `leash-data:/data` volume. Stop with `make docker-down`.
+
+
+## State Directory
+
+Leash stores local state under `~/.leash` by default. Set `LEASH_HOME` to move the whole tree. Policies live in `~/.leash/policies/`, keys in `~/.leash/keys/`, the SQLite database at `~/.leash/leash.db`, CLI identity at `~/.leash/token.json`, and SDK/MCP identities under `~/.leash/agents/`. `POLICIES_DIR`, `KEYS_DIR`, and `DATABASE_URL` still override individual locations.
 
 ## The CLI
 
-If you installed via `pip install leash`, the `leash` command is already available:
+If you installed with `uv tool install 'leash[server]'`, the `leash` command is already available:
 
 ```bash
 leash status        # check server health
@@ -97,11 +104,7 @@ leash agents list   # see registered agents
 leash --help        # see all commands
 ```
 
-If you're running from source and want `leash` as a global command:
-
-```bash
-make install-cli
-```
+From source, run CLI commands with `uv run leash ...`. Use `leash --version` to confirm the installed version.
 
 ## What's Next
 

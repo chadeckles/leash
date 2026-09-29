@@ -98,7 +98,13 @@ def _args_to_context(tool_args: Any) -> Dict[str, Any]:
 
 def _default_token_file(agent_name: str) -> Path:
     safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in agent_name)
-    return Path.home() / ".leash" / f"mcp_{safe}.json"
+    from leash import paths
+
+    current = paths.agents_dir() / f"mcp_{safe}.json"
+    legacy = paths.leash_home() / f"mcp_{safe}.json"
+    if not current.exists() and legacy.exists():
+        return legacy
+    return current
 
 
 class MCPProxy:

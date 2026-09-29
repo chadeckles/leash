@@ -3,46 +3,53 @@ name: Tests
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, next]
   pull_request:
-    branches: [main]
+    branches: [main, next]
 
 permissions:
   contents: read
 
 jobs:
   test:
-    name: Run Tests
+    name: Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
 
     steps:
       - uses: actions/checkout@v5
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -e ".[dev]"
+        run: uv sync --locked --all-extras
 
       - name: Lint with ruff
-        run: ruff check app/ sdk/ tests/
+        run: uv run --all-extras ruff check src/ tests/
 
       - name: Run tests
         run: |
           mkdir -p test-results
-          python -m pytest tests/ \
-            -v \
-            --tb=short \
-            --junitxml=test-results/results.xml
+          uv run --all-extras pytest -v --tb=short --junitxml=test-results/results.xml
+
+      - name: Core install works without server extras
+        run: |
+          uv build --wheel -o dist
+          uv venv /tmp/core && VIRTUAL_ENV=/tmp/core uv pip install dist/*.whl
+          /tmp/core/bin/leash --version
+          /tmp/core/bin/python -c "from leash import LeashAgent; from leash.engine import PolicyEngine"
+          /tmp/core/bin/leash policy validate src/leash/presets/
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results
+          name: test-results-${{ matrix.python-version }}
           path: test-results/results.xml

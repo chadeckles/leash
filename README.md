@@ -16,7 +16,7 @@
 
 You wouldn't let a dog roam the neighborhood unsupervised, so why let an AI agent read your files, send emails, and call APIs _without_ guardrails? Leash is an API-layer policy engine that sits between your agent and the outside world — no containers, no sidecars, just authorization. You write simple YAML rules that say what's allowed. Everything else is denied. Every decision from allow or deny activities is logged in a cryptographically signed, hash-chained audit trail that's tamper-evident by design.
 
-One `pip install`, one policy file, and your agent is on a leash.
+One install, one policy file, and your agent is on a leash.
 
 ## 🌟 Highlights
 
@@ -28,34 +28,37 @@ One `pip install`, one policy file, and your agent is on a leash.
 - 🧩 **Framework-agnostic** — Python SDK, MCP proxy, or plain REST
 - 🧠 **[OpenClaw ready](docs/docs/openclaw-guide.md)** — built-in policies for the popular open-source AI assistant
 - 🛡️ **OWASP mapped** — rules and audit checks reference [OWASP ASI](https://owasp.org/www-project-agentic-security-initiative/) and [LLM Top 10](https://owasp.org/www-project-top-10-for-large-language-model-applications/) threat IDs
-- ⚡ **One dependency** — `pip install leash`. No Go, no Rust, no sidecar containers
+- ⚡ **Small core** — `pip install leash` for SDK/CLI/engine, or `leash[server]` to run the server
 - 📖 **[Full documentation](docs/docs/index.md)** — getting started, policy writing guide, SDK reference, CLI reference, architecture
 
 ## ⬇️ Installation
 
 ```bash
-pip install leash
+uv tool install 'leash[server]'
+# alternatives: pipx install 'leash[server]' or pip install 'leash[server]'
 ```
 
 Or run from source:
 
 ```bash
 git clone https://github.com/chadeckles/leash.git && cd leash
-make quickstart    # installs deps, starts server, runs a demo
+uv sync --all-extras
+uv run leash start
 ```
 
 Requires Python 3.11+ (macOS ships with 3.9 — run `brew install python@3.12` first if needed).
 
-> 💡 **Running from source?** Use `pip install -e .` to make the `leash` command available globally, or use `./leash` directly from the repo root. See the [getting started guide](docs/docs/getting-started.md) for details.
+> 💡 **Running from source?** Use `uv sync --all-extras` and `uv run leash start`, or `make quickstart` for the demo flow. See the [getting started guide](docs/docs/getting-started.md) for details.
 
 ### Starting the Server
 
 After installing, start the server:
 
 ```bash
-leash start              # start on port 8000
+leash start              # start on 127.0.0.1:8000
 leash start --reload     # auto-reload for development
 leash start --port 9000  # custom port
+leash start --host 0.0.0.0  # expose on the network
 ```
 
 Or from source: `make dev`
@@ -69,9 +72,9 @@ For developers building agents in Python (LangChain, CrewAI, or custom code). Ad
 Wrap individual functions with a decorator:
 
 ```python
-from sdk import LeashAgent
+from leash import LeashAgent
 
-agent = LeashAgent("http://localhost:8000", name="my-agent")
+agent = LeashAgent(name="my-agent")
 
 @agent.tool("email.read")
 def read_inbox(mailbox: str):
@@ -102,7 +105,7 @@ If the action is denied, the function doesn't run. If Leash is unreachable, it d
 [MCP (Model Context Protocol)](https://modelcontextprotocol.io) is how AI tools like Claude Desktop and Cursor connect to external tool servers — but MCP has no built-in authorization. This proxy sits between the AI and the MCP server so every tool call is checked against your policies, with zero code changes to the server:
 
 ```bash
-python -m sdk.mcp_proxy \
+leash-mcp-proxy \
     --agent-name "fs-agent" \
     -- npx -y @modelcontextprotocol/server-filesystem /data
 ```
@@ -120,7 +123,7 @@ See the [MCP Proxy Guide](docs/docs/mcp-proxy-guide.md) for Claude Desktop confi
 leash agents register --name "openclaw-agent" --vendor openclaw
 
 # The built-in policy allows reads and web search, denies exec and browser.
-# Customize app/policies/openclaw.yaml to match your needs.
+# Customize ~/.leash/policies/openclaw.yaml to match your needs.
 ```
 
 See the full [OpenClaw Integration Guide](docs/docs/openclaw-guide.md) for setup, example policies, and tool mappings.
@@ -146,7 +149,7 @@ Full interactive API docs at **http://localhost:8000/docs** once the server is r
 
 ## 📜 Writing Rules
 
-Rules live in `app/policies/*.yaml`. The server picks up changes automatically — no restart needed.
+Rules live in `~/.leash/policies/*.yaml` by default. The server seeds bundled presets there on first start and picks up changes automatically — no restart needed.
 
 ```yaml
 name: email-agent
@@ -178,7 +181,7 @@ Rules also support rate limiting, ABAC conditions, and OWASP threat tags — see
 leash status                              # server health
 leash agents list                         # registered agents
 leash agents register --name "my-bot"     # register a new agent
-leash policy validate app/policies/       # lint your YAML rules
+leash policy validate ~/.leash/policies/  # lint your YAML rules
 leash audit scan                          # security scan (integrity, storms, shadows)
 leash scan -- npx -y @mcp/server-fs /data # scan an MCP server's tools
 leash dashboard                           # live terminal TUI
@@ -192,23 +195,20 @@ make docker-up     # build + start on port 8000
 make docker-down   # stop + remove volumes
 ```
 
-Images are published to [GHCR](https://ghcr.io/chadeckles/leash), multi-arch (amd64 + arm64), and signed with [cosign](https://github.com/sigstore/cosign).
+Images are published to [GHCR](https://ghcr.io/chadeckles/leash), multi-arch (amd64 + arm64), and signed with [cosign](https://github.com/sigstore/cosign). The container uses `LEASH_HOME=/data` with one `leash-data:/data` volume; read the admin key with `docker exec leash-server cat /data/keys/admin.key`.
 
 ## 🏗️ Project Layout
 
 ```
-app/
-  policies/       ← your rules (edit these)
-  policy/         ← policy engine
-  audit/          ← hash-chained audit log
-  identity/       ← agent registration & JWT
-  core/           ← config, auth, crypto, DB
-sdk/
-  client.py       ← Python SDK (LeashAgent)
+src/leash/
+  __init__.py     ← public SDK exports
   cli.py          ← CLI
+  client.py       ← Python SDK (LeashAgent)
   mcp_proxy.py    ← MCP authorization proxy
   scanner.py      ← security surface scanner
-  dashboard.py    ← terminal TUI
+  engine/         ← pure policy engine
+  presets/        ← bundled starter policies
+  server/         ← FastAPI server, routes, models, audit, identity
 tests/            ← test suite
 ```
 

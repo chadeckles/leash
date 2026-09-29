@@ -664,11 +664,9 @@ def main():
         if p.exists():
             token = json.loads(p.read_text()).get("token")
     if not token:
-        from pathlib import Path
-        import json
-        default = Path(".leash_identity.json")
-        if default.exists():
-            token = json.loads(default.read_text()).get("token")
+        from leash.cli import _load_token
+
+        token = _load_token(None, None)
 
     run(url=args.url, token=token, refresh=args.refresh)
 

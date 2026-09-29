@@ -11,7 +11,8 @@ POLICIES_DIR = str(paths.policies_dir())
 KEYS_DIR = str(paths.keys_dir())
 
 # JWT settings
-JWT_ALGORITHM = "RS256"
+# Algorithm for newly generated server keys; legacy RSA keys keep using RS256.
+JWT_ALGORITHM = "EdDSA"
 JWT_ISSUER = "leash-identity-service"
 # 168h = 7 days.  Survives a workweek without anyone thinking about it.
 # The SDK auto-refreshes on 401, so expiry is invisible to users.

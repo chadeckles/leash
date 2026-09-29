@@ -1,143 +1,98 @@
-# Policy for OpenClaw (https://github.com/openclaw/openclaw)
+# OpenClaw guardrails (https://github.com/openclaw/openclaw)
 #
-# OpenClaw is a popular open-source personal AI assistant that can run shell
-# commands, browse the web, read/write files, and manage multi-agent sessions.
-# This policy governs what an OpenClaw agent may do through Leash.
+# Used by `leash install openclaw`, which adds a small plugin to OpenClaw that
+# sends every tool call to `leash hook openclaw` before it runs.
 #
-# OpenClaw's built-in tools map directly to Leash action names:
-#   exec, process, read, write, edit, apply_patch, browser, canvas,
-#   web_search, web_fetch, memory_search, memory_get, sessions_send, etc.
+# OpenClaw's file and shell tools (read, write, edit, apply_patch, exec) are
+# mapped to the same actions as coding agents (file.read, file.write,
+# shell.exec, ...), so the coding-agent policy's protections — secrets, SSH
+# keys, `rm -rf ~`, curl | sh, writes outside the workspace — apply too.
+# This file only adds rules for OpenClaw-specific tools and files.  Anything
+# it doesn't mention falls through to the coding-agent policy.
 #
-# Usage:
-#   leash agents register --name "openclaw-agent" --vendor openclaw
+# OpenClaw-only tools appear as `tool.<name>`: tool.gateway, tool.nodes,
+# tool.cron, tool.message, tool.browser, tool.sessions_spawn, ...
+# `leash audit tail` shows exactly what your assistant calls.
 #
-# Tune this policy to your comfort level. The defaults below are a
-# reasonable starting point: read and search are allowed, writes and
-# shell execution require explicit opt-in, and browser/canvas are blocked.
-
-name: openclaw-policy
+# Rules are checked top to bottom and the first match wins.  Test a change:
+#   leash policy test --local --agent openclaw -a tool.cron
+name: openclaw
 description: >-
-  Balanced policy for OpenClaw personal AI assistants. Allows reads, web
-  search, and session management. Denies exec, writes, and browser by
-  default — uncomment rules to unlock them as needed.
+  Guardrails for the OpenClaw personal assistant: protect its config,
+  plugins and channel credentials, and ask before it changes its own
+  gateway, controls paired devices or schedules jobs that run without you.
 priority: 20
+mode: enforce
 agents:
-  - "*openclaw*"
-  - "*claw*"
+  - "openclaw*"
 
 rules:
-  # ── File I/O ──────────────────────────────────────────────────────────
-  - action: "read"
-    effect: allow
-    reason: "OpenClaw may read files in the workspace"
-
-  - action: "write"
+  # ── Tamper protection: OpenClaw's config and plugins (Leash is a plugin) ──
+  - action: "file.[wd]*"
+    resource: "*/.openclaw*/openclaw.json*"
     effect: deny
-    reason: "File writes are blocked — uncomment the allow rule below to enable"
-    # To allow writes, change effect to 'allow' or add an observe rule first:
-    # - action: "write"
-    #   effect: observe
-    #   observe_deny: false
-    #   reason: "Shadow writes before enforcing"
-
-  - action: "edit"
+    reason: "The assistant may not edit OpenClaw's config (it controls plugins, including Leash)"
+    owasp: ["ASI03"]
+  - action: "file.[wd]*"
+    resource: "*/.openclaw*/extensions/*"
     effect: deny
-    reason: "File edits are blocked — uncomment to enable"
+    reason: "The assistant may not change installed OpenClaw plugins"
+    owasp: ["ASI03"]
+  - action: "shell.exec"
+    resource: "*openclaw plugins*"
+    effect: ask
+    reason: "Changing OpenClaw plugins needs your approval"
+    owasp: ["ASI03"]
+  - action: "shell.exec"
+    resource: "*openclaw config*"
+    effect: ask
+    reason: "Changing OpenClaw's config needs your approval"
+    owasp: ["ASI03"]
+  - action: "shell.exec"
+    resource: "*.openclaw*/openclaw.json*"
+    effect: ask
+    reason: "Shell access to OpenClaw's config needs your approval"
+    owasp: ["ASI03"]
+  - action: "tool.gateway"
+    effect: ask
+    reason: "The gateway tool can change OpenClaw's config, restart or update it"
+    owasp: ["ASI03"]
 
-  - action: "apply_patch"
+  # ── Secrets: channel logins and API keys ──
+  - action: "file.*"
+    resource: "*/.openclaw*/credentials/*"
     effect: deny
-    reason: "File patches are blocked — uncomment to enable"
-
-  # ── Shell execution ───────────────────────────────────────────────────
-  - action: "exec"
+    reason: "OpenClaw's channel credentials are off-limits"
+    owasp: ["LLM02", "ASI03"]
+  - action: "shell.exec"
+    resource: "*.openclaw*/credentials*"
     effect: deny
-    reason: "Shell execution is blocked — this is the highest-risk tool"
-    owasp:
-      - "ASI06"
-      - "LLM06"
+    reason: "OpenClaw's channel credentials are off-limits"
+    owasp: ["LLM02", "ASI03"]
+  - action: "file.read"
+    resource: "*/.openclaw*/openclaw.json*"
+    effect: ask
+    reason: "OpenClaw's config can contain API keys"
+    owasp: ["LLM02"]
 
-  - action: "process"
-    effect: deny
-    reason: "Background processes are blocked"
+  # ── Things a personal assistant does on its own: ask first ──
+  - action: "tool.nodes"
+    effect: ask
+    reason: "Controlling paired devices (camera, screen, location, commands) needs your approval"
+    owasp: ["ASI02"]
+  - action: "tool.cron"
+    effect: ask
+    reason: "Scheduling jobs that run later without you needs your approval"
+    owasp: ["ASI02"]
 
-  - action: "code_execution"
-    effect: deny
-    reason: "Sandboxed code execution is blocked"
-
-  # ── Web ───────────────────────────────────────────────────────────────
-  - action: "web_search"
+  # Sending messages is what an assistant is for, but cap runaway loops.
+  # Change this to `effect: ask` to approve every outgoing message.
+  - action: "tool.message"
     effect: allow
-    reason: "OpenClaw may search the web"
-
-  - action: "web_fetch"
-    effect: allow
-    reason: "OpenClaw may fetch web pages"
-
-  - action: "x_search"
-    effect: allow
-    reason: "OpenClaw may search X/Twitter"
-
-  # ── Browser & UI ─────────────────────────────────────────────────────
-  - action: "browser"
-    effect: deny
-    reason: "Browser control is blocked — high risk, enables arbitrary web actions"
-    owasp:
-      - "ASI02"
-
-  - action: "canvas"
-    effect: deny
-    reason: "Canvas/A2UI is blocked"
-
-  # ── Memory ────────────────────────────────────────────────────────────
-  - action: "memory_search"
-    effect: allow
-    reason: "OpenClaw may search its memory"
-
-  - action: "memory_get"
-    effect: allow
-    reason: "OpenClaw may retrieve memory entries"
-
-  # ── Multi-agent sessions ──────────────────────────────────────────────
-  - action: "sessions_list"
-    effect: allow
-    reason: "OpenClaw may list active sessions"
-
-  - action: "sessions_history"
-    effect: allow
-    reason: "OpenClaw may read session history"
-
-  - action: "sessions_send"
-    effect: allow
-    reason: "OpenClaw may send messages between sessions"
+    reason: "Sending messages (rate-limited)"
     rate_limit:
       max_calls: 30
       window: 60
 
-  - action: "sessions_spawn"
-    effect: deny
-    reason: "Spawning new agent sessions is blocked"
-
-  - action: "session_status"
-    effect: allow
-    reason: "OpenClaw may check session status"
-
-  # ── Automation & system ───────────────────────────────────────────────
-  - action: "cron"
-    effect: allow
-    reason: "OpenClaw may schedule tasks and reminders"
-    rate_limit:
-      max_calls: 20
-      window: 3600
-
-  - action: "gateway"
-    effect: deny
-    reason: "Gateway control is blocked — prevents config changes"
-
-  - action: "nodes"
-    effect: deny
-    reason: "Device node control is blocked"
-
-  # ── Catch-all ─────────────────────────────────────────────────────────
-  - action: "*"
-    effect: deny
-    reason: "Everything not explicitly allowed is denied"
+  # Everything else (browser, web, memory, sessions, file and shell work)
+  # falls through to the coding-agent policy.

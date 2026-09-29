@@ -1,0 +1,7 @@
+{
+  "id": "leash",
+  "name": "Leash",
+  "description": "Checks every OpenClaw tool call against your Leash policies (~/.leash/policies) before it runs.",
+  "activation": { "onStartup": true },
+  "configSchema": { "type": "object", "additionalProperties": false, "properties": {} }
+}

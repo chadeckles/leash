@@ -131,6 +131,10 @@ def evaluate(
         agent_name=_resolve_agent_name(agent_id, db),
         rate_limiter=RATE_LIMITER if db is not None else None,
     )
+    if result.needs_approval:
+        # API callers have no interactive approver, so "ask" fails closed.
+        result.decision = "deny"
+        result.reason = f"Requires human approval: {result.reason}"
     signature = sign_data({
         "agent_id": agent_id,
         "action": action,

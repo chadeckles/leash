@@ -7,6 +7,21 @@ Get Leash running and see it make allow/deny decisions in under 2 minutes.
 - Python 3.11+ (macOS ships with 3.9 — run `brew install python@3.12` first if needed)
 - uv (recommended for source installs) or pip/pipx
 
+!!! tip "New to AI agents?"
+    Read [Start Here](start-here.md) first: it explains everything step by step, from installing uv to your first blocked command.
+
+## AI agents: two commands
+
+If you want guardrails for Claude Code, Copilot CLI, Cursor, Codex or OpenClaw, you don't need a server:
+
+```bash
+uv tool install leash
+leash install          # then restart your agent
+leash doctor
+```
+
+See [Coding Agents (Hooks)](hooks.md) and the [OpenClaw guide](openclaw-guide.md). The options below set up the server for the Python SDK, REST API and dashboard.
+
 ## Option 1: Install the server + CLI (Recommended)
 
 ```bash
@@ -108,7 +123,9 @@ From source, run CLI commands with `uv run leash ...`. Use `leash --version` to 
 
 ## What's Next
 
-Now that Leash is running, follow the **scan-first workflow** — don't guess at policies:
+**Using Leash with coding agents or OpenClaw?** You're done. Use `leash audit tail -f` to watch, `leash explain` when something is blocked, and `leash allow` to make an exception. See [Coding Agents (Hooks)](hooks.md).
+
+**Building your own agent with the server or SDK?** Follow the **scan-first workflow** — don't guess at policies:
 
 1. **Register your agent** — `leash agents register --name my-agent`
 2. **Deploy in observe mode** — capture real actions without blocking anything

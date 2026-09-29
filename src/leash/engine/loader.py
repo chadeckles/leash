@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
-from leash.engine.core import Policy, compile_policy
+from leash.engine.core import Policy, compile_policy, sort_policies
 
 _logger = logging.getLogger("leash.engine")
 
@@ -77,7 +77,7 @@ class PolicyDirectory:
                     continue
                 docs.append(d)
             self._docs = docs
-            self._compiled = compiled
+            self._compiled = sort_policies(compiled)
             self._signature = sig
 
     def invalidate(self) -> None:
@@ -87,6 +87,7 @@ class PolicyDirectory:
 
     @property
     def policies(self) -> List[Policy]:
+        """Compiled policies, highest priority first."""
         self._refresh()
         return list(self._compiled)
 

@@ -1,8 +1,6 @@
-"""Policy Engine — 10 tests covering authorization, CRUD, wildcards, rate limits,
-ABAC, observe mode, dry-run, OWASP tags, and resource traversal.
-
-Replaces: test_policy.py (31), test_observe_mode.py (16), test_edge_cases.py (4) = 51 → 10
-"""
+"""Server policy API: authorization (allow/deny/default, identity, a
+data-driven matrix of wildcards, ABAC, OWASP tags, traversal and ask), rate
+limits, CRUD, observe mode and dry-run."""
 
 from __future__ import annotations
 
@@ -64,19 +62,10 @@ def test_authorize_allow_deny_default(client):
     # ── Missing fields → 422 ──
     assert client.post("/authorize", json={"agent_id": aid}, headers=hdr).status_code == 422
 
-
-# ── 2. Identity enforcement ───────────────────────────────────────────────────
-
-def test_authorize_identity_enforcement(client):
-    """Agent A cannot authorize or view permissions on behalf of Agent B.
-
-    Replaces: test_authorize_identity_enforcement, test_effective_permissions_identity_enforcement.
-    """
-    aid_a, hdr_a = register_agent(client, "agent-a")
-    aid_b, hdr_b = register_agent(client, "agent-b")
-
-    assert client.post("/authorize", json={"agent_id": aid_b, "action": "read_file"}, headers=hdr_a).status_code == 403
-    assert client.get(f"/agents/{aid_b}/permissions", headers=hdr_a).status_code == 403
+    # ── Identity: agent A can't authorize or read permissions as agent B ──
+    aid_b, _ = register_agent(client, "agent-b")
+    assert client.post("/authorize", json={"agent_id": aid_b, "action": "read_file"}, headers=hdr).status_code == 403
+    assert client.get(f"/agents/{aid_b}/permissions", headers=hdr).status_code == 403
 
 
 # ── 3. CRUD lifecycle ─────────────────────────────────────────────────────────
@@ -145,54 +134,63 @@ def test_policy_crud_lifecycle(client, auth_header):
     assert client.delete("/policies/managed/99999", headers=auth_header).status_code == 404
 
 
-# ── 4. Wildcard / glob matching ───────────────────────────────────────────────
+# ── Authorization matrix (data-driven) ────────────────────────────────────
 
-def test_wildcard_and_glob_matching(client):
-    """email.* matches email.read/send, doesn't match calendar.read,
-    specific deny overrides wildcard allow, multi-level file.read.* works,
-    resource glob /data/* matches, and dry-run respects wildcards.
+MATRIX_POLICY = """
+agents: ["*"]
+rules:
+  - {action: "email.delete", effect: deny, reason: "No deleting email"}
+  - {action: "email.*", effect: allow, reason: "Email OK"}
+  - {action: "file.read.*", effect: allow, reason: "Read any file type"}
+  - {action: "access_file", resource: "/data/*", effect: allow, reason: "Data dir only"}
+  - {action: "db.query", effect: allow, reason: "Analysts only", conditions: {user_role: analyst}}
+  - {action: "db.write", effect: allow, reason: "Admin eng only", conditions: {user_role: admin, department: "eng-*"}}
+  - {action: "tagged.action", effect: allow, reason: "Tagged", owasp: [LLM06, LLM10]}
+  - {action: "deploy.*", effect: ask, reason: "needs a human"}
+"""
 
-    Replaces: 7 wildcard tests + test_dry_run_with_wildcards.
-    """
-    aid, hdr = register_agent(client, "wc-agent")
+# (action, resource, context, expected decision, reason substring, OWASP tags)
+MATRIX = [
+    ("email.read", "", None, "allow", "", None),
+    ("email.send", "", None, "allow", "", None),
+    ("email.delete", "", None, "deny", "No deleting", None),       # specific deny beats wildcard
+    ("calendar.read", "", None, "deny", "", None),                 # wildcard doesn't over-match
+    ("file.read.csv", "", None, "allow", "", None),                # multi-level wildcard
+    ("file.write.csv", "", None, "deny", "", None),
+    ("access_file", "/data/report.txt", None, "allow", "", None),  # resource glob
+    ("access_file", "/secrets/pw.txt", None, "deny", "", None),
+    ("access_file", "/data/../../etc/passwd", None, "deny", "", None),  # traversal
+    ("access_file", "/data/%2e%2e/etc/passwd", None, "deny", "", None),
+    ("db.query", "", {"user_role": "analyst"}, "allow", "", None),  # ABAC
+    ("db.query", "", {"user_role": "admin"}, "deny", "", None),
+    ("db.query", "", None, "deny", "", None),
+    ("db.write", "", {"user_role": "admin", "department": "eng-platform"}, "allow", "", None),
+    ("db.write", "", {"user_role": "admin", "department": "sales"}, "deny", "", None),
+    ("tagged.action", "", None, "allow", "", ["LLM06", "LLM10"]),  # rule-level OWASP
+    ("deploy.prod", "", None, "deny", "Requires human approval", None),  # the server can't prompt
+]
 
-    # ── email.* with explicit deny on email.delete ──
+
+def test_authorize_matrix(client):
+    aid, hdr = register_agent(client, "matrix-agent")
+    admin = admin_headers(client)
+    client.post("/policies/managed", json={"name": "matrix", "priority": 100, "yaml_content": MATRIX_POLICY},
+                headers=admin)
     client.post("/policies/managed", json={
-        "name": "email-mixed", "priority": 100,
-        "yaml_content": (
-            'agents:\n  - "*"\nrules:\n'
-            '  - action: "email.delete"\n    effect: deny\n    reason: "No deleting email"\n'
-            '  - action: "email.*"\n    effect: allow\n    reason: "Email OK"\n'
-            '  - action: "file.read.*"\n    effect: allow\n    reason: "Read any file type"\n'
-            '  - action: "access_file"\n    resource: "/data/*"\n    effect: allow\n    reason: "Data dir only"'
-        ),
-    }, headers=admin_headers(client))
+        "name": "owasp-plvl", "priority": 100,
+        "yaml_content": 'agents: ["*"]\nowasp: ["LLM06"]\nrules:\n  - {action: "plvl.action", effect: allow, reason: "Policy tags"}',
+    }, headers=admin)
 
-    # Matches
-    assert client.post("/authorize", json={"agent_id": aid, "action": "email.read"}, headers=hdr).json()["decision"] == "allow"
-    assert client.post("/authorize", json={"agent_id": aid, "action": "email.send"}, headers=hdr).json()["decision"] == "allow"
-    # Specific deny beats wildcard allow
-    assert client.post("/authorize", json={"agent_id": aid, "action": "email.delete"}, headers=hdr).json()["decision"] == "deny"
-    # Doesn't over-match
-    assert client.post("/authorize", json={"agent_id": aid, "action": "calendar.read"}, headers=hdr).json()["decision"] == "deny"
-    # Multi-level wildcard
-    assert client.post("/authorize", json={"agent_id": aid, "action": "file.read.csv"}, headers=hdr).json()["decision"] == "allow"
-    assert client.post("/authorize", json={"agent_id": aid, "action": "file.write.csv"}, headers=hdr).json()["decision"] == "deny"
-    # Resource glob
-    assert client.post("/authorize", json={"agent_id": aid, "action": "access_file", "resource": "/data/report.txt"}, headers=hdr).json()["decision"] == "allow"
-    assert client.post("/authorize", json={"agent_id": aid, "action": "access_file", "resource": "/secrets/pw.txt"}, headers=hdr).json()["decision"] == "deny"
-
-    # ── Dry-run with wildcards ──
-    candidate = 'name: wc-dr\npriority: 100\nagents: ["*"]\nrules:\n  - action: "email.*"\n    effect: allow\n    reason: "All email"'
-    data = client.post("/policies/dry-run", json={
-        "policy_yaml": candidate, "agent_id": "dr-agent",
-        "actions": [{"action": "email.read"}, {"action": "calendar.read"}],
-    }, headers=hdr).json()
-    results = {r["action"]: r for r in data["results"]}
-    assert results["email.read"]["decision"] == "allow"
+    failures = []
+    for action, resource, context, want, reason, owasp in MATRIX + [("plvl.action", "", None, "allow", "", ["LLM06"])]:
+        body = {"agent_id": aid, "action": action, "resource": resource, "context": context or {}}
+        data = client.post("/authorize", json=body, headers=hdr).json()
+        if data["decision"] != want or reason not in data["reason"] or (owasp and data["owasp"] != owasp):
+            failures.append(f"{action} {resource} {context}: want {want} ~{reason!r} {owasp}, got {data}")
+    assert not failures, "\n".join(failures)
 
 
-# ── 5. Rate limiting ──────────────────────────────────────────────────────────
+# ── Rate limiting ──────────────────────────────────────────────────────────
 
 def test_rate_limiting(client):
     """Within limit → allowed, exceeded → denied with OWASP tag,
@@ -227,38 +225,6 @@ def test_rate_limiting(client):
 
     # Agent B is independent — still allowed
     assert client.post("/authorize", json={"agent_id": aid_b, "action": "limited.call"}, headers=hdr_b).json()["decision"] == "allow"
-
-
-# ── 6. ABAC conditions ────────────────────────────────────────────────────────
-
-def test_abac_conditions(client):
-    """Conditions: match → allow, mismatch → skip (deny), no context → skip,
-    multiple conditions all must match, glob values work.
-
-    Replaces: 5 ABAC tests.
-    """
-    aid, hdr = register_agent(client, "abac-agent")
-    client.post("/policies/managed", json={
-        "name": "abac-policy", "priority": 100,
-        "yaml_content": (
-            'agents:\n  - "*"\nrules:\n'
-            '  - action: "db.query"\n    effect: allow\n    reason: "Analysts only"\n'
-            '    conditions:\n      user_role: "analyst"\n'
-            '  - action: "db.write"\n    effect: allow\n    reason: "Admin eng only"\n'
-            '    conditions:\n      user_role: "admin"\n      department: "eng-*"'
-        ),
-    }, headers=admin_headers(client))
-
-    # Match
-    assert client.post("/authorize", json={"agent_id": aid, "action": "db.query", "context": {"user_role": "analyst"}}, headers=hdr).json()["decision"] == "allow"
-    # Mismatch
-    assert client.post("/authorize", json={"agent_id": aid, "action": "db.query", "context": {"user_role": "admin"}}, headers=hdr).json()["decision"] == "deny"
-    # No context
-    assert client.post("/authorize", json={"agent_id": aid, "action": "db.query"}, headers=hdr).json()["decision"] == "deny"
-    # Multi-condition: both match
-    assert client.post("/authorize", json={"agent_id": aid, "action": "db.write", "context": {"user_role": "admin", "department": "eng-platform"}}, headers=hdr).json()["decision"] == "allow"
-    # Multi-condition: one mismatch
-    assert client.post("/authorize", json={"agent_id": aid, "action": "db.write", "context": {"user_role": "admin", "department": "sales"}}, headers=hdr).json()["decision"] == "deny"
 
 
 # ── 7. Observe mode full cycle ────────────────────────────────────────────────
@@ -350,6 +316,9 @@ rules:
   - action: "read_file"
     effect: deny
     reason: "Candidate denies reads"
+  - action: "email.*"
+    effect: allow
+    reason: "All email"
 """
     data = client.post("/policies/dry-run", json={
         "policy_yaml": candidate, "agent_id": "dr-agent",
@@ -358,6 +327,8 @@ rules:
             {"action": "read_file"},
             {"action": "write_file"},
             {"action": "db.query", "context": {"user_role": "analyst"}},
+            {"action": "email.read"},
+            {"action": "calendar.read"},
         ],
     }, headers=auth_header).json()
     results = {r["action"]: r for r in data["results"]}
@@ -366,64 +337,10 @@ rules:
     assert results["write_file"]["decision"] == "deny"
     assert results["db.query"]["decision"] == "allow"
     assert "LLM06" in results["db.query"]["owasp"]
+    assert (results["email.read"]["decision"], results["calendar.read"]["decision"]) == ("allow", "deny")
 
     # Empty YAML
     data = client.post("/policies/dry-run", json={
         "policy_yaml": "", "agent_id": "x", "actions": [{"action": "read_file"}],
     }, headers=auth_header).json()
     assert "Invalid or empty" in data["summary"]
-
-
-# ── 9. OWASP tags ─────────────────────────────────────────────────────────────
-
-def test_owasp_tags(client):
-    """Rule-level and policy-level OWASP tags propagate to authorize response.
-
-    Replaces: test_owasp_tags_in_response, test_owasp_tags_from_policy_level.
-    """
-    aid, hdr = register_agent(client, "owasp-agent")
-
-    # Rule-level
-    client.post("/policies/managed", json={
-        "name": "owasp-rule", "priority": 100,
-        "yaml_content": (
-            'agents:\n  - "*"\nrules:\n'
-            '  - action: "tagged.action"\n    effect: allow\n    reason: "Tagged"\n'
-            '    owasp: ["LLM06", "LLM10"]'
-        ),
-    }, headers=admin_headers(client))
-    data = client.post("/authorize", json={"agent_id": aid, "action": "tagged.action"}, headers=hdr).json()
-    assert "LLM06" in data["owasp"] and "LLM10" in data["owasp"]
-
-    # Policy-level
-    aid2, hdr2 = register_agent(client, "owasp-plvl")
-    client.post("/policies/managed", json={
-        "name": "owasp-plvl", "priority": 100,
-        "yaml_content": (
-            'agents:\n  - "*"\nowasp: ["LLM06"]\nrules:\n'
-            '  - action: "plvl.action"\n    effect: allow\n    reason: "Policy tags"'
-        ),
-    }, headers=admin_headers(client))
-    data = client.post("/authorize", json={"agent_id": aid2, "action": "plvl.action"}, headers=hdr2).json()
-    assert data["owasp"] == ["LLM06"]
-
-
-# ── 10. Resource traversal ────────────────────────────────────────────────────
-
-def test_resource_traversal_blocked(client):
-    """Path traversal (../ and %2e%2e) is normalized before matching.
-
-    Replaces: test_resource_traversal_blocked.
-    """
-    aid, hdr = register_agent(client, "traversal-agent")
-    client.post("/policies/managed", json={
-        "name": "traversal-test", "priority": 100,
-        "yaml_content": (
-            'agents:\n  - "*"\nrules:\n'
-            '  - action: "access_file"\n    resource: "/data/*"\n    effect: allow\n    reason: "Data only"'
-        ),
-    }, headers=admin_headers(client))
-
-    assert client.post("/authorize", json={"agent_id": aid, "action": "access_file", "resource": "/data/../../etc/passwd"}, headers=hdr).json()["decision"] == "deny"
-    assert client.post("/authorize", json={"agent_id": aid, "action": "access_file", "resource": "/data/%2e%2e/etc/passwd"}, headers=hdr).json()["decision"] == "deny"
-    assert client.post("/authorize", json={"agent_id": aid, "action": "access_file", "resource": "/data/report.csv"}, headers=hdr).json()["decision"] == "allow"

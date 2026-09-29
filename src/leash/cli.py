@@ -1,15 +1,23 @@
-"""Leash CLI – manage agents, policies, and audit from the command line.
+"""Leash CLI – guardrails and audit for AI agents.
 
-Quick start (zero config)::
+Quick start for coding agents (no server)::
 
-    leash start                        # run the server (needs `leash[server]`)
+    leash install                     # hook every detected agent
+    leash install claude-code openclaw # or name them
+    leash hosts                       # what's hooked where
+    leash audit tail -f               # watch decisions
+    leash explain                     # why was that blocked?
+    leash allow                       # ...and allow it from now on
+    leash policy test --local -a shell.exec -r "git push --force"
+    leash init --preset coding-agent  # (re)install a bundled preset
+    leash uninstall                   # remove the hooks
+
+Server mode (``leash[server]``) for the HTTP API, SDK and dashboard::
+
+    leash start                        # run the server
     leash agents list                  # auto-registers on first run!
 
-Or initialize explicitly::
-
-    leash init                         # register + cache token
-
-Usage::
+Usage (server commands)::
 
     # Bootstrap
     leash init                        # register CLI agent, cache JWT
@@ -34,7 +42,7 @@ Usage::
     leash status
     leash dashboard
 
-Requires a running Leash server (default http://localhost:8000).
+Server commands require a running Leash server (default http://localhost:8000).
 Token auto-cached to ~/.leash/token.json (under $LEASH_HOME) on first use.
 Override with --token or --token-file if needed.
 """
@@ -50,7 +58,8 @@ from pathlib import Path
 
 import httpx
 
-from leash import __version__, paths
+from leash import __version__, cli_local, paths
+from leash.cli_local import HOST_CHOICES
 
 
 LEASH_URL = os.getenv("LEASH_URL", "http://localhost:8000")
@@ -1048,7 +1057,79 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     def _check(name: str, status: str, detail: str, severity: str = "info") -> None:
         checks.append({"check": name, "status": status, "detail": detail, "severity": severity})
 
-    # ── 1. Server reachability ─────────────────────────────────────────────
+    # ── Local: hooks, policies, audit chain (no server needed) ────────────
+    from leash import auditlog
+    from leash.hooks import install as hook_install
+
+    hook_rows = hook_install.status()
+    hooked = [r for r in hook_rows if r["installed"]]
+    for r in hook_rows:
+        if r["error"]:
+            _check(f"hook_{r['host']}", "warn", f"Could not read {r['path']}: {r['error']}", "medium")
+    from leash.hooks import openclaw as openclaw_hook
+
+    if (openclaw_hook.plugin_dir() / "index.js").is_file() and not openclaw_hook.is_linked():
+        _check("hook_openclaw", "warn",
+               "The Leash plugin for OpenClaw isn't linked into OpenClaw yet — run: "
+               + openclaw_hook.shell_line(openclaw_hook.link_commands()[0]), "medium")
+    if hooked:
+        _check("hooks", "pass", "Hooks installed: " + ", ".join(f"{r['host']} ({r['scope']})" for r in hooked))
+    else:
+        detected = hook_install.detect_hosts()
+        hint = f" Detected {', '.join(detected)} — run 'leash install'." if detected else ""
+        _check("hooks", "info", "No agent hooks installed." + hint)
+
+    try:
+        from leash.engine.validator import validate_policy_yaml
+        policy_dir = paths.policies_dir()
+        if policy_dir.exists():
+            errors = []
+            yaml_files = list(policy_dir.glob("*.yaml")) + list(policy_dir.glob("*.yml"))
+            for yf in yaml_files:
+                issues = validate_policy_yaml(yf.read_text())
+                # Filter out "missing reason" warnings — only keep real errors
+                real_errors = [i for i in issues if "recommended" not in i.lower()]
+                if real_errors:
+                    errors.append(f"{yf.name}: {real_errors[0]}")
+            if errors:
+                _check("policy_yaml", "fail",
+                       f"{len(errors)} invalid policy file(s): {'; '.join(errors[:3])}", "high")
+            else:
+                _check("policy_yaml", "pass", f"{len(yaml_files)} policy file(s) valid")
+        else:
+            _check("policy_yaml", "info", "Policy directory not found (not running on server host)")
+    except ImportError:
+        _check("policy_yaml", "info", "Policy validation skipped — app module not available")
+
+
+    if hooked:
+        from leash.engine import PolicyDirectory
+        policies = PolicyDirectory(paths.policies_dir()).policies
+        from leash.engine import evaluate_policies
+
+        for host in sorted({r["host"] for r in hooked}):
+            covering = [p.name for p in policies if p.name != "default" and p.applies_to(host, host)]
+            routine = evaluate_policies(policies, host, "shell.exec", "ls", {"host": host},
+                                        agent_name=host, normalize=False)
+            if covering and routine.decision != "allow":
+                _check(f"policy_{host}", "fail",
+                       f"{host} is governed by {', '.join(covering)}, but even `ls` is {routine.decision} "
+                       f"({routine.reason}). Run 'leash init --preset coding-agent --force'", "high")
+            elif covering:
+                _check(f"policy_{host}", "pass", f"{host} is governed by: {', '.join(covering)}")
+            else:
+                _check(f"policy_{host}", "fail",
+                       f"No policy matches agent '{host}', so every tool call is denied — "
+                       "run 'leash init --preset coding-agent'", "high")
+
+    ok, count, problem = auditlog.verify()
+    if ok:
+        _check("local_audit", "pass" if count else "info",
+               f"Local audit chain intact ({count} entries)" if count else "No local audit entries yet")
+    else:
+        _check("local_audit", "fail", f"Local audit chain broken after {count} entries: {problem}", "critical")
+
+    # ── Server (optional when hooks are installed) ────────────────────────
     client = _get_client(args.url)
     try:
         resp = client.get("/health")
@@ -1057,6 +1138,10 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         else:
             _check("server", "fail", f"Server returned HTTP {resp.status_code}", "critical")
     except Exception:
+        if hooked or count:
+            _check("server", "info", f"No server at {args.url} (not needed for hooks)")
+            _print_doctor(checks, args)
+            return
         _check("server", "fail", f"Cannot reach Leash at {args.url}", "critical")
         _print_doctor(checks, args)
         sys.exit(1)
@@ -1192,29 +1277,6 @@ def cmd_doctor(args: argparse.Namespace) -> None:
             _check("audit_integrity", "info", f"Audit scan returned HTTP {scan_resp.status_code}")
     except Exception:
         _check("audit_integrity", "info", "Audit scan check skipped")
-
-    # ── 7. Policy YAML validation (local files) ───────────────────────────
-    try:
-        from leash.engine.validator import validate_policy_yaml
-        policy_dir = paths.policies_dir()
-        if policy_dir.exists():
-            errors = []
-            yaml_files = list(policy_dir.glob("*.yaml")) + list(policy_dir.glob("*.yml"))
-            for yf in yaml_files:
-                issues = validate_policy_yaml(yf.read_text())
-                # Filter out "missing reason" warnings — only keep real errors
-                real_errors = [i for i in issues if "recommended" not in i.lower()]
-                if real_errors:
-                    errors.append(f"{yf.name}: {real_errors[0]}")
-            if errors:
-                _check("policy_yaml", "fail",
-                       f"{len(errors)} invalid policy file(s): {'; '.join(errors[:3])}", "high")
-            else:
-                _check("policy_yaml", "pass", f"{len(yaml_files)} policy file(s) valid")
-        else:
-            _check("policy_yaml", "info", "Policy directory not found (not running on server host)")
-    except ImportError:
-        _check("policy_yaml", "info", "Policy validation skipped — app module not available")
 
     _print_doctor(checks, args)
 
@@ -1366,9 +1428,51 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
 
     # ── init ──
-    init_p = sub.add_parser("init", help="Register CLI agent & cache token (run this first!)")
+    init_p = sub.add_parser("init", help="Register a server CLI agent, or install a policy preset with --preset")
     init_p.add_argument("--name", default="cli-admin", help="Agent name (default: cli-admin)")
-    init_p.add_argument("--force", action="store_true", help="Re-register even if already initialized")
+    init_p.add_argument("--force", action="store_true", help="Re-register (or overwrite the preset) even if it exists")
+    init_p.add_argument("--preset", help="Install a bundled policy preset locally (e.g. coding-agent); no server needed")
+    init_p.add_argument("--list-presets", action="store_true", help="List bundled policy presets")
+
+    # ── hooks (local, no server) ──
+    hook_p = sub.add_parser("hook", help="Evaluate one agent tool call from stdin (called by the agent's hook)")
+    hook_p.add_argument("host", nargs="?", default="auto", choices=("auto",) + HOST_CHOICES)
+
+    def agent_name(value: str) -> str:
+        # Validated here, not via choices=: Python 3.11's argparse rejects an
+        # empty nargs="*" list when choices is set.
+        if value not in HOST_CHOICES:
+            raise argparse.ArgumentTypeError(f"invalid choice: {value!r} (choose from {', '.join(HOST_CHOICES)})")
+        return value
+
+    inst_p = sub.add_parser("install", help="Hook Leash into your agents (Claude Code, Copilot CLI, Cursor, Codex, OpenClaw)")
+    inst_p.add_argument("hosts", nargs="*", type=agent_name, metavar="AGENT",
+                        help=f"Agents to hook ({', '.join(HOST_CHOICES)}); default: every detected agent")
+    inst_p.add_argument("--project", nargs="?", const="", metavar="DIR",
+                        help="Write repo-level hook config (commit it) instead of user-level")
+    inst_p.add_argument("--command", dest="hook_command", help="Override the hook command (advanced)")
+    inst_p.add_argument("--dry-run", action="store_true", help="Show what would be written")
+
+    uninst_p = sub.add_parser("uninstall", help="Remove Leash hooks from coding agents")
+    uninst_p.add_argument("hosts", nargs="*", type=agent_name, metavar="AGENT", help=f"Agents to unhook ({', '.join(HOST_CHOICES)}); default: all")
+    uninst_p.add_argument("--project", nargs="?", const="", metavar="DIR", help="Remove repo-level hook config")
+    uninst_p.add_argument("--dry-run", action="store_true", help="Show what would be removed")
+
+    hosts_p = sub.add_parser("hosts", help="Show which coding agents are detected and hooked")
+    hosts_p.add_argument("--project", metavar="DIR", help="Project directory to inspect (default: cwd)")
+    hosts_p.add_argument("--json", dest="json_out", action="store_true", help="Output JSON")
+
+    explain_p = sub.add_parser("explain", help="Explain the most recent blocked or approval-required tool call")
+    explain_p.add_argument("which", nargs="?", default="last",
+                           help="'last' (default) or N for the Nth most recent")
+
+    allow_p = sub.add_parser("allow", help="Allow a tool call Leash blocked or asked about (adds a rule to my_rules.yaml)")
+    allow_p.add_argument("which", nargs="?", default="last", help="'last' (default) or N, as shown by `leash explain`")
+    allow_p.add_argument("--pattern", help="Allow a glob pattern instead of exactly this resource (e.g. '/Users/me/Desktop/*')")
+    allow_p.add_argument("--all-agents", action="store_true", help="Apply to every agent, not just the one that was blocked")
+    allow_p.add_argument("--undo", action="store_true", help="Remove the most recent rule added with `leash allow`")
+    allow_p.add_argument("--dry-run", action="store_true", help="Show the rule without saving it")
+    allow_p.add_argument("--yes", "-y", action="store_true", help="Don't ask for confirmation")
 
     # ── agents ──
     agents_parser = sub.add_parser("agents", help="Manage agents")
@@ -1417,9 +1521,13 @@ def main() -> None:
 
     # policy test
     pt = policy_sub.add_parser("test", help="Test actions against policies")
-    pt.add_argument("--action", "-a", action="append", required=True, help="Action to test (repeatable)")
-    pt.add_argument("--agent", default="test-agent", help="Agent name or ID to test as")
+    pt.add_argument("--action", "-a", action=cli_local.OrderedChecks, required=True, help="Action to test (repeatable)")
+    pt.add_argument("--agent", default=None, help="Agent name or ID to test as (default: test-agent, or claude-code with --local)")
     pt.add_argument("--policy-file", "-f", help="Candidate YAML (uses dry-run)")
+    pt.add_argument("--local", action="store_true", help="Evaluate ~/.leash/policies in-process (no server)")
+    pt.add_argument("--resource", "-r", action=cli_local.OrderedChecks,
+                    help="Resource for the preceding --action, e.g. a command or path (repeatable; --local)")
+    pt.add_argument("--strict", action="store_true", help="Exit 1 if anything is denied or needs approval (--local)")
 
     # ── audit ──
     audit_parser = sub.add_parser("audit", help="Audit log commands")
@@ -1449,6 +1557,14 @@ def main() -> None:
     aexport.add_argument("--action", help="Filter by action name")
     aexport.add_argument("--limit", type=int, default=10000, help="Max entries (default: 10000)")
     aexport.add_argument("--pretty", action="store_true", help="Pretty-print each JSON event (not pipe-friendly)")
+
+    # audit tail / verify (local hook audit log)
+    atail = audit_sub.add_parser("tail", help="Show recent local hook decisions")
+    atail.add_argument("-n", "--lines", type=int, default=20, help="Number of entries (default: 20)")
+    atail.add_argument("-f", "--follow", action="store_true", help="Keep printing new entries")
+    atail.add_argument("--json", dest="json_out", action="store_true", help="Output raw JSON lines")
+    atail.add_argument("-w", "--wide", action="store_true", help="Don't shorten long commands and paths")
+    audit_sub.add_parser("verify", help="Verify the local audit hash chain")
 
     # ── status ──
     sub.add_parser("status", help="Check Leash server health and metrics")
@@ -1490,14 +1606,36 @@ def main() -> None:
     args = parser.parse_args()
 
     # Dispatch
-    if args.command == "init":
-        cmd_init(args)
+    if args.command == "hook":
+        from leash.hooks.runner import run as run_hook
+        sys.exit(run_hook(args.host))
+    elif args.command == "install":
+        cli_local.cmd_install(args)
+    elif args.command == "uninstall":
+        cli_local.cmd_uninstall(args)
+    elif args.command == "hosts":
+        cli_local.cmd_hosts(args)
+    elif args.command == "explain":
+        cli_local.cmd_explain(args)
+    elif args.command == "allow":
+        cli_local.cmd_allow(args)
+    elif args.command == "init":
+        if args.preset or args.list_presets:
+            cli_local.cmd_init_preset(args)
+        else:
+            cmd_init(args)
     elif args.command == "agents":
         {"list": cmd_agents_list, "register": cmd_agents_register, "deregister": cmd_agents_deregister, "delete": cmd_agents_deregister, "show": cmd_agents_show, "permissions": cmd_agents_permissions}[args.agents_command](args)
+    elif args.command == "policy" and args.policy_command == "test" and args.local:
+        args.agent = args.agent or "claude-code"
+        cli_local.cmd_policy_test_local(args)
     elif args.command == "policy":
+        if args.policy_command == "test":
+            args.agent = args.agent or "test-agent"
         {"list": cmd_policy_list, "validate": cmd_policy_validate, "test": cmd_policy_test}[args.policy_command](args)
     elif args.command == "audit":
-        {"summary": cmd_audit_summary, "log": cmd_audit_log, "scan": cmd_audit_scan, "export": cmd_audit_export}[args.audit_command](args)
+        {"summary": cmd_audit_summary, "log": cmd_audit_log, "scan": cmd_audit_scan, "export": cmd_audit_export,
+         "tail": cli_local.cmd_audit_tail, "verify": cli_local.cmd_audit_verify}[args.audit_command](args)
     elif args.command == "status":
         cmd_status(args)
     elif args.command == "start":

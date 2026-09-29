@@ -46,7 +46,7 @@ def test_policy_validator_and_metrics():
     assert any("'rules' is empty" in e for e in validate_policy({"name": "t", "agents": ["*"], "rules": []}))
 
     # ── Invalid effect ──
-    assert any("'effect' must be 'allow' or 'deny'" in e for e in
+    assert any("'effect' must be 'allow', 'deny' or 'ask'" in e for e in
                validate_policy({"name": "t", "agents": ["*"], "rules": [{"action": "x", "effect": "maybe"}]}))
 
     # ── Unknown keys ──
@@ -152,7 +152,7 @@ def test_yaml_error_api_responses(client, auth_header):
         "yaml_content": "name: bad-eff\nagents:\n  - '*'\nrules:\n  - action: test\n    effect: maybe\n",
     }, headers=auth_header)
     assert resp.status_code == 422
-    assert any("'effect' must be 'allow' or 'deny'" in e for e in resp.json()["detail"]["errors"])
+    assert any("'effect' must be 'allow', 'deny' or 'ask'" in e for e in resp.json()["detail"]["errors"])
 
     # ── Unknown keys ──
     resp = client.post("/policies/managed", json={

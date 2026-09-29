@@ -8,7 +8,7 @@ Policies are plain YAML documents::
     mode: enforce            # or observe
     rules:
       - action: "email.send"
-        effect: allow
+        effect: allow          # allow | deny | ask (escalate to a human)
         reason: "Can send mail"
         resource: "/outbox/*"
         conditions: {env: prod}
@@ -27,6 +27,7 @@ from leash.engine.matching import check_conditions, match_agent, match_pattern, 
 from leash.engine.ratelimit import InMemoryRateLimiter, RateLimiter
 
 DEFAULT_DENY_REASON = "No matching policy found"
+EFFECTS = ("allow", "deny", "ask")
 
 
 @dataclass(frozen=True)
@@ -74,6 +75,11 @@ class Decision:
     @property
     def allowed(self) -> bool:
         return self.decision == "allow"
+
+    @property
+    def needs_approval(self) -> bool:
+        """True when the matched rule asks for a human to confirm (``effect: ask``)."""
+        return self.decision == "ask"
 
     @property
     def audit_decision(self) -> str:
@@ -131,13 +137,16 @@ def evaluate_policies(
     agent_name: str = "",
     rate_limiter: Optional[RateLimiter] = None,
     dry_run: bool = False,
+    normalize: bool = True,
 ) -> Decision:
     """Evaluate *policies* (already sorted by priority, highest first).
 
     ``dry_run`` skips rate limiting and reports the raw effect of observe-mode
-    policies instead of converting denials into allows.
+    policies instead of converting denials into allows.  ``normalize=False``
+    matches *resource* verbatim (for shell commands and URLs, which are not
+    filesystem paths); callers are then responsible for canonicalizing paths.
     """
-    safe_resource = normalize_resource(resource)
+    safe_resource = normalize_resource(resource) if normalize else (resource or "")
     for policy in policies:
         if not policy.applies_to(agent_id, agent_name):
             continue
@@ -157,10 +166,14 @@ def evaluate_policies(
                         reason = f"Rate limit exceeded: {count}/{max_calls} calls in the last {window:g}s window"
                         owasp = sorted(set((owasp or []) + ["LLM10"]))
 
+            if decision not in EFFECTS:
+                decision = "deny"
+
             observation = None
-            if decision == "deny" and policy.mode == "observe" and not dry_run:
+            if decision in ("deny", "ask") and policy.mode == "observe" and not dry_run:
+                verb = "deny" if decision == "deny" else "require approval for"
                 observation = (
-                    f"OBSERVE: policy '{policy.name}' would deny this action "
+                    f"OBSERVE: policy '{policy.name}' would {verb} this action "
                     f"(rule: {rule.action}, reason: {reason})"
                 )
                 decision = "allow"
@@ -210,8 +223,10 @@ class PolicyEngine:
         *,
         agent_name: str = "",
         dry_run: bool = False,
+        normalize: bool = True,
     ) -> Decision:
         return evaluate_policies(
             self.policies, agent_id, action, resource, context,
             agent_name=agent_name, rate_limiter=self.rate_limiter, dry_run=dry_run,
+            normalize=normalize,
         )

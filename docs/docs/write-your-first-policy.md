@@ -2,6 +2,9 @@
 
 Policies are YAML files that tell Leash what an agent is allowed to do. This guide walks you through writing one from scratch — **starting with a scan of what the agent actually does.**
 
+!!! tip "Just want to allow one thing?"
+    If you use Leash with a coding agent or OpenClaw and it flagged something you trust, you don't need to write YAML: run `leash explain` to see why, then `leash allow` to add an exception (`leash allow --undo` reverts it). See [Allowing something Leash flagged](hooks.md#allowing-something-leash-flagged).
+
 ## The Scan-First Workflow
 
 !!! tip "Don't guess — scan first"
@@ -189,6 +192,19 @@ agent.authorize("file.read", resource="/etc/passwd")          # → deny
 
 !!! warning "Path traversal protection"
     Leash normalizes resource paths automatically. An agent trying `/data/../../etc/passwd` will be evaluated against `/etc/passwd`, not `/data/*`. You don't need to handle this yourself.
+
+## Asking a Human (`effect: ask`)
+
+Besides `allow` and `deny`, a rule can use `effect: ask`: a person must confirm the action.
+
+```yaml
+- action: "shell.exec"
+  resource: "git push*--force*"
+  effect: ask
+  reason: "Force-pushing rewrites shared history"
+```
+
+With [coding-agent hooks](hooks.md), the agent shows its approval prompt with your reason. Agents that can't prompt, and the server's `/authorize` API, treat `ask` as deny.
 
 ## Rate Limiting
 

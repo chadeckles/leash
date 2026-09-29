@@ -69,6 +69,21 @@ uv run pytest --cov=src/leash -v
 
 All tests must pass before submitting.
 
+Tests are data-driven where possible. To pin down how Leash treats a tool
+call (a new evasion, a preset rule, a host quirk), add a line to
+`tests/cases/hook_decisions.yaml` rather than a new test function. Engine and
+server authorization cases live in the `ENGINE_CASES` and `MATRIX` tables in
+`tests/test_engine.py` and `tests/test_policy.py`.
+
+The unit tests use a fake `openclaw`. When you change the OpenClaw plugin or
+installer, also run the live test against a real OpenClaw (needs Node 22+ and
+npm). It works in a throwaway sandbox, uses a scripted local model (no API
+key), and writes `openclaw-live-test-report.txt`:
+
+```bash
+python3 scripts/openclaw_live_test.py            # add --keep to inspect the sandbox
+```
+
 ### 4. Lint
 
 ```bash

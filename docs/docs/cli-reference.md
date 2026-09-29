@@ -1,6 +1,8 @@
 # CLI Reference
 
-The Leash CLI manages agents, policies, and audit logs from the terminal. It auto-registers on first use — no setup required.
+The Leash CLI hooks coding agents into local policy checks (no server), and manages agents, policies and audit logs on a Leash server. Server commands auto-register on first use.
+
+**Local commands (no server):** [`install` / `uninstall` / `hosts` / `hook`](#coding-agent-hooks), [`init --preset`](#leash-init), [`policy test --local`](#policy-test), [`audit tail` / `audit verify`](#audit-tail-verify), [`doctor`](#leash-doctor).
 
 ## Installation
 
@@ -35,20 +37,106 @@ Registering the CLI's admin identity requires the server's **admin key**. When t
 
 ---
 
+## Coding-agent hooks
+
+See the [coding agents guide](hooks.md) for how hooks work and the action vocabulary.
+
+### install
+
+```bash
+leash install                          # every detected agent, user scope
+leash install claude-code copilot      # specific agents
+leash install --project [DIR]          # repo-level config (commit it)
+leash install --dry-run                # print what would be written
+```
+
+| Flag | Description |
+|------|-------------|
+| `AGENT ...` | `claude-code`, `copilot`, `cursor`, `codex`, `openclaw` (default: every agent detected on this machine) |
+| `--project [DIR]` | Write repo-level config in `DIR` (default: current directory) |
+| `--dry-run` | Show the resulting config without writing it |
+| `--command CMD` | Override the hook command (advanced) |
+
+Creates `~/.leash/policies/` with the bundled presets on first run, or adds the `coding-agent` preset if it's missing. Existing config is merged and backed up to `~/.leash/backups/`. Re-running is a no-op.
+
+`openclaw` installs a plugin into `~/.leash/integrations/openclaw` and links it with the `openclaw` CLI (user scope only; see the [OpenClaw guide](openclaw-guide.md)). It also replaces the pre-0.4 server-era `openclaw.yaml` preset, backing up the old file.
+
+### uninstall
+
+```bash
+leash uninstall                        # all agents, user scope
+leash uninstall cursor --project
+```
+
+Removes only Leash's hook entries (and deletes `leash.json` for Copilot, or unlinks and deletes the OpenClaw plugin). Your policies and audit log in `~/.leash` are kept; the output explains how to remove everything.
+
+### explain
+
+```bash
+leash explain          # most recent deny / ask / observe decision
+leash explain 2        # the second most recent
+```
+
+Explains a flagged decision from the local audit log in plain English: what the agent tried, which rule matched (and the policy file it's in), what the agent did with the verdict, and the `leash allow` commands you could run.
+
+### allow
+
+```bash
+leash allow                               # allow exactly the most recent flagged call, for that agent
+leash allow 2 --pattern '~/notes/*'       # allow a glob instead, based on the 2nd most recent
+leash allow --all-agents                  # don't limit the rule to the agent that was flagged
+leash allow --dry-run                     # print the rule only
+leash allow --undo                        # remove the last rule added
+```
+
+| Flag | Description |
+|------|-------------|
+| `WHICH` | Which flagged decision (1 = most recent) |
+| `--pattern GLOB` | Allow resources matching this glob instead of the exact one |
+| `--all-agents` | Apply to every agent (default: only the agent that was flagged) |
+| `--undo` | Remove the most recently added rule |
+| `--dry-run` | Show the rule without saving |
+| `-y`, `--yes` | Don't ask for confirmation (otherwise an interactive terminal is required) |
+
+Rules are written to `~/.leash/policies/my_rules.yaml` (`priority: 100`). After saving, the call is re-evaluated to confirm it's now allowed. On case-insensitive filesystems (macOS), a lower-case copy of file and shell rules is added too.
+
+### hosts
+
+```bash
+leash hosts            # table: detected / hooked (user) / hooked (project)
+leash hosts --json
+```
+
+### hook
+
+```bash
+leash hook claude-code < payload.json
+```
+
+The command the agents run for every tool call. It reads the agent's JSON on stdin and prints the decision in that agent's format. `auto` detects the agent from the payload. Exit code 2 means Leash itself failed and the call is blocked (unless `LEASH_FAIL_OPEN=1`).
+
+---
+
 ## leash init
 
-Register a CLI agent and cache the identity token.
+Register a CLI agent with the server and cache the identity token, or install a bundled policy preset locally.
 
 ```bash
 leash init
 leash init --name my-admin-bot
 leash init --force              # re-register even if cached
+
+leash init --list-presets
+leash init --preset coding-agent          # copy into ~/.leash/policies (no server)
+leash init --preset coding-agent --force  # restore the original
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--name NAME` | `cli-admin` | Agent name for the CLI identity |
-| `--force` | — | Re-register even if already initialized |
+| `--force` | — | Re-register even if already initialized; with `--preset`, overwrite the existing file |
+| `--preset NAME` | — | Install a bundled preset into the local policy directory |
+| `--list-presets` | — | List bundled presets |
 
 **Token location:** `~/.leash/token.json` (mode `0600`)
 
@@ -197,7 +285,7 @@ leash policy validate my-policy.yaml ~/.leash/policies/
   ✔ ~/.leash/policies/email_agent.yaml
   ✘ ~/.leash/policies/broken.yaml
     → rules[1]: missing required field 'action'
-    → rules[2]: invalid effect 'allow_maybe' (must be allow or deny)
+    → rules[2]: 'effect' must be 'allow', 'deny' or 'ask', got 'allow_maybe'
 
   2 error(s) in 3 file(s)
 ```
@@ -214,13 +302,19 @@ leash policy test --action email.send --action email.read --agent <agent-id>
 
 # Dry-run against a YAML file (no side effects)
 leash policy test --action file.read --action file.write -f my-policy.yaml --agent test-agent
+
+# Local: evaluate ~/.leash/policies in-process, exactly like the hooks do
+leash policy test --local -a shell.exec -r "git push --force" -r "npm test" -a file.read -r ~/.ssh/id_rsa
 ```
 
 | Flag | Required | Description |
 |------|----------|-------------|
 | `--action, -a` | ✔ | Action to test (repeatable) |
-| `--agent` | — | Agent ID to test as (default: `test-agent`) |
-| `--policy-file, -f` | — | YAML file for dry-run mode |
+| `--agent` | — | Agent name or ID to test as (default: `test-agent`, or `claude-code` with `--local`) |
+| `--policy-file, -f` | — | YAML file for dry-run mode (with `--local`, overlays the candidate on your policies) |
+| `--local` | — | No server: evaluate the local policy directory |
+| `--resource, -r` | — | Resource for the preceding `--action` (repeatable; `--local`) |
+| `--strict` | — | Exit 1 if any check is denied or needs approval (`--local`) |
 
 **Example output (dry-run):**
 
@@ -383,6 +477,20 @@ Each exported event includes:
 
 ---
 
+### audit tail / verify
+
+The local audit log written by coding-agent hooks (`~/.leash/audit/audit.jsonl`). No server needed.
+
+```bash
+leash audit tail              # last 20 decisions
+leash audit tail -n 100 -f    # follow
+leash audit tail --json       # raw JSON lines
+leash audit tail -w           # don't shorten long commands and paths
+leash audit verify            # check the hash chain (exit 1 if broken)
+```
+
+---
+
 ## leash status
 
 Quick health check:
@@ -501,7 +609,9 @@ leash doctor
 
 Checks:
 
-- Server reachability
+- Which coding agents are hooked, and that a policy covers each one
+- Local policy files are valid, and the local audit chain is intact
+- Server reachability (informational only when hooks are installed and no server is running)
 - Server key age (warns at 90+ days, suggests `leash server rotate-keys`)
 - Database connectivity
 - Policy loading

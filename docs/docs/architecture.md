@@ -199,7 +199,7 @@ The pure `leash.engine` library (`PolicyEngine`, `PolicyDirectory`, `InMemoryRat
       ii.  Does resource match?   → no: skip
       iii. Do conditions pass?    → no: skip
       iv.  Is rate limit OK?      → no: deny (rate limited)
-      v.   Return the rule's effect (allow or deny)
+      v.   Return the rule's effect (allow, deny or ask; the server treats ask as deny)
 3. No match found → deny (default)
 ```
 

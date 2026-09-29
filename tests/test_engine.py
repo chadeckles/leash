@@ -38,40 +38,41 @@ def test_engine_imports_no_server_or_http_deps():
     subprocess.run([sys.executable, "-c", code], check=True)
 
 
-def test_priority_first_match_and_default_deny():
-    engine = _engine(
-        _policy("low", 1, rules=[_rule("email.*")]),
-        _policy("high", 10, rules=[_rule("email.send", "deny")]),
-    )
-    d = engine.evaluate("a", "email.send")
-    assert (d.decision, d.matched_policy) == ("deny", "high")
-    assert engine.evaluate("a", "email.read").allowed
-    miss = engine.evaluate("a", "shell.exec")
-    assert (miss.decision, miss.matched_policy) == ("deny", None)
+ENGINE = _engine(
+    _policy("low", 1, rules=[_rule("email.*")]),
+    _policy("high", 10, rules=[_rule("email.send", "deny")]),
+    _policy("crew", 5, agents=["crewai-*"], rules=[_rule("crew.*")]),
+    _policy("files", 5, rules=[_rule("file.read", resource="/data/*", conditions={"env": "prod-*"})]),
+    _policy("watch", 5, mode="observe", rules=[_rule("rm", "deny")]),
+)
+
+# (action, resource, context, agent_name, expected decision, expected matched policy)
+ENGINE_CASES = [
+    ("email.send", "", None, None, "deny", "high"),            # priority: highest first
+    ("email.read", "", None, None, "allow", "low"),            # first match across policies
+    ("shell.exec", "", None, None, "deny", None),              # default deny
+    ("crew.run", "", None, "crewai-research", "allow", "crew"),  # agent name glob
+    ("crew.run", "", None, "other", "deny", None),
+    ("file.read", "/data/x.csv", {"env": "prod-eu"}, None, "allow", "files"),
+    ("file.read", "/data/../etc/passwd", {"env": "prod-eu"}, None, "deny", None),   # traversal
+    ("file.read", "/data/%2e%2e/etc/passwd", {"env": "prod-eu"}, None, "deny", None),
+    ("file.read", "/data/x.csv", {"env": "dev"}, None, "deny", None),               # condition mismatch
+    ("file.read", "/data/x.csv", None, None, "deny", None),                         # missing context
+    ("rm", "", None, None, "allow", "watch"),                  # observe mode never blocks
+]
 
 
-def test_agent_matching_by_name_and_id():
-    engine = _engine(_policy(agents=["crewai-*"], rules=[_rule("*")]))
-    assert engine.evaluate("id-1", "x", agent_name="crewai-research").allowed
-    assert not engine.evaluate("id-1", "x", agent_name="other").allowed
+def test_engine_cases():
+    failures = []
+    for action, resource, context, name, want, policy in ENGINE_CASES:
+        d = ENGINE.evaluate("id-1", action, resource, context, agent_name=name)
+        if (d.decision, d.matched_policy) != (want, policy):
+            failures.append(f"{action} {resource} {context} {name}: want {want}/{policy}, got {d.decision}/{d.matched_policy}")
+    assert not failures, "\n".join(failures)
 
-
-def test_resource_traversal_and_conditions():
-    engine = _engine(_policy(rules=[
-        _rule("file.read", resource="/data/*", conditions={"env": "prod-*"}),
-    ]))
-    assert engine.evaluate("a", "file.read", "/data/x.csv", {"env": "prod-eu"}).allowed
-    assert not engine.evaluate("a", "file.read", "/data/../etc/passwd", {"env": "prod-eu"}).allowed
-    assert not engine.evaluate("a", "file.read", "/data/%2e%2e/etc/passwd", {"env": "prod-eu"}).allowed
-    assert not engine.evaluate("a", "file.read", "/data/x.csv", {"env": "dev"}).allowed
-    assert not engine.evaluate("a", "file.read", "/data/x.csv").allowed
-
-
-def test_observe_mode_and_dry_run():
-    engine = _engine(_policy(mode="observe", rules=[_rule("rm", "deny")]))
-    d = engine.evaluate("a", "rm")
-    assert d.allowed and d.observation and d.audit_decision == "observe_deny"
-    assert engine.evaluate("a", "rm", dry_run=True).decision == "deny"
+    observed = ENGINE.evaluate("a", "rm")
+    assert observed.observation and observed.audit_decision == "observe_deny"
+    assert ENGINE.evaluate("a", "rm", dry_run=True).decision == "deny"
 
 
 def test_rate_limit_sliding_window():
@@ -90,7 +91,7 @@ def test_rate_limit_sliding_window():
     assert "not checked in dry-run" in engine.evaluate("a", "api.call", dry_run=True).reason
 
 
-def test_policy_directory_reloads_on_change(tmp_path):
+def test_policy_directory_reloads_and_skips_invalid_files(tmp_path):
     (tmp_path / "p.yaml").write_text("name: p\nagents: ['*']\nrules:\n  - action: a\n    effect: allow\n    reason: r\n")
     (tmp_path / "broken.yaml").write_text("rules: [\n")
     directory = PolicyDirectory(tmp_path, check_interval=0)
@@ -98,13 +99,20 @@ def test_policy_directory_reloads_on_change(tmp_path):
 
     time.sleep(0.01)
     (tmp_path / "q.yml").write_text("name: q\npriority: 5\nagents: ['*']\nrules: []\n")
-    assert [p.name for p in directory.policies] == ["p", "q"]
+    assert [p.name for p in directory.policies] == ["q", "p"]  # highest priority first
 
     engine = PolicyEngine.from_directory(tmp_path)
     assert engine.evaluate("x", "a").allowed
 
+    # Invalid files are skipped, not fatal
+    (tmp_path / "b.yaml").write_text("name: b\nagents: ['other']\nrules: ['email.send']\n")
+    (tmp_path / "c.yaml").write_text("name: c\npriority: high\nagents: ['*']\nrules: []\n")
+    time.sleep(0.01)
+    assert [p.name for p in directory.policies] == ["q", "p"]
+    assert {d["name"] for d in directory.documents} == {"q", "p"}
 
-def test_leash_home_and_preset_seeding(tmp_path, monkeypatch):
+
+def test_leash_home_paths_presets_and_identities(tmp_path, monkeypatch):
     monkeypatch.setenv("LEASH_HOME", str(tmp_path / "home"))
     monkeypatch.delenv("POLICIES_DIR", raising=False)
     monkeypatch.delenv("KEYS_DIR", raising=False)
@@ -127,21 +135,22 @@ def test_leash_home_and_preset_seeding(tmp_path, monkeypatch):
     paths.write_private(secret, "{}")
     assert stat.S_IMODE(os.stat(secret).st_mode) == 0o600
 
-
-def test_sdk_identity_defaults_to_leash_home(tmp_path, monkeypatch):
+    # SDK and MCP proxy identities live under LEASH_HOME; legacy files still work
     from leash import LeashAgent
+    from leash.mcp_proxy import _default_token_file
 
-    monkeypatch.setenv("LEASH_HOME", str(tmp_path))
     monkeypatch.setenv("LEASH_URL", "http://example.invalid:9")
     monkeypatch.chdir(tmp_path)
     agent = LeashAgent(name="bot", auto_register=False)
     assert agent.base_url == "http://example.invalid:9"
-    assert agent.token_file == tmp_path / "agents" / "bot.json"
+    assert agent.token_file == home / "agents" / "bot.json"
     assert LeashAgent(name="bot", token_file=None).token_file is None
-
-    # A pre-0.4 identity in the working directory is still picked up
     (tmp_path / ".leash_identity.json").write_text('{"name": "legacy", "agent_id": "x", "token": "t"}')
     assert LeashAgent(name="legacy").token_file.name == ".leash_identity.json"
+
+    assert _default_token_file("fs") == home / "agents" / "mcp_fs.json"
+    (home / "mcp_fs.json").write_text("{}")
+    assert _default_token_file("fs") == home / "mcp_fs.json"
 
 
 @pytest.fixture()
@@ -154,7 +163,7 @@ def isolated_keys(tmp_path, monkeypatch):
     return tmp_path
 
 
-def test_new_keys_are_ed25519(isolated_keys):
+def test_server_keys_ed25519_and_legacy_rsa(isolated_keys):
     from leash.server.core import security
 
     token = security.create_agent_token("a", "n")
@@ -166,10 +175,8 @@ def test_new_keys_are_ed25519(isolated_keys):
     assert not security.verify_signature({"k": 1}, "not-hex")
     assert stat.S_IMODE(os.stat(isolated_keys / "server_private.pem").st_mode) == 0o600
 
-
-def test_legacy_rsa_keys_still_work_and_rotate_to_ed25519(isolated_keys):
-    from leash.server.core import security
-
+    # Legacy RSA keys keep working and rotate to Ed25519
+    security._cached_keys = None
     priv, pub = security.generate_rsa_keypair()
     (isolated_keys / "server_private.pem").write_bytes(priv)
     (isolated_keys / "server_public.pem").write_bytes(pub)
@@ -185,25 +192,3 @@ def test_legacy_rsa_keys_still_work_and_rotate_to_ed25519(isolated_keys):
     assert security.verify_agent_token(old_token)["sub"] == "a"
     assert security.verify_signature({"k": 1}, old_sig)
     assert security.verify_agent_token(security.create_agent_token("b", "n"))["sub"] == "b"
-
-
-def test_invalid_policy_file_is_skipped(tmp_path):
-    from leash.engine import PolicyDirectory, evaluate_policies
-
-    (tmp_path / "a.yaml").write_text("name: a\nagents: ['*']\nrules:\n  - action: '*'\n    effect: allow\n")
-    (tmp_path / "b.yaml").write_text("name: b\nagents: ['other']\nrules: ['email.send']\n")
-    (tmp_path / "c.yaml").write_text("name: c\npriority: high\nagents: ['*']\nrules: []\n")
-    pd = PolicyDirectory(tmp_path)
-    assert [p.name for p in pd.policies] == ["a"]
-    assert [d["name"] for d in pd.documents] == ["a"]
-    assert evaluate_policies(pd.policies, "x", "read").allowed
-
-
-def test_mcp_proxy_legacy_token_file(tmp_path, monkeypatch):
-    from leash import paths
-    from leash.mcp_proxy import _default_token_file
-
-    monkeypatch.setenv("LEASH_HOME", str(tmp_path))
-    assert _default_token_file("fs") == paths.agents_dir() / "mcp_fs.json"
-    (tmp_path / "mcp_fs.json").write_text("{}")
-    assert _default_token_file("fs") == tmp_path / "mcp_fs.json"

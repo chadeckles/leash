@@ -9,6 +9,8 @@ Everything lives under a single home directory, like ``~/.claude`` or
       leash.db       server database
       token.json     CLI identity
       agents/        cached SDK / MCP proxy agent identities
+      audit/         local hash-chained decision log (agent hooks)
+      state/         hook rate-limit counters and other small state
 
 ``LEASH_HOME`` overrides the root.  ``POLICIES_DIR``, ``KEYS_DIR`` and
 ``DATABASE_URL`` still override individual locations.
@@ -51,6 +53,14 @@ def agents_dir() -> Path:
     return leash_home() / "agents"
 
 
+def audit_log_file() -> Path:
+    return Path(os.getenv("LEASH_AUDIT_LOG") or leash_home() / "audit" / "audit.jsonl").expanduser()
+
+
+def state_dir() -> Path:
+    return leash_home() / "state"
+
+
 def agent_identity_file(name: str) -> Path:
     """Cached identity for an SDK/proxy/CLI-registered agent."""
     safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in name) or "agent"
@@ -76,7 +86,8 @@ def preset_names() -> list[str]:
 
 
 def preset_path(name: str):
-    """Return a Traversable for a bundled preset (``default`` → default.yaml)."""
+    """Return a Traversable for a bundled preset (``coding-agent`` → coding_agent.yaml)."""
+    name = name.replace("-", "_")
     for ext in (".yaml", ".yml"):
         candidate = resources.files(PRESETS_PACKAGE) / f"{name}{ext}"
         if candidate.is_file():
@@ -102,3 +113,17 @@ def seed_policies(target: Path | None = None, presets: list[str] | None = None) 
             shutil.copyfile(src_file, dest)
         written.append(dest)
     return written
+
+
+def install_preset(name: str, target: Path | None = None, *, force: bool = False) -> Path | None:
+    """Copy one bundled preset into *target*.  Returns the path written, or
+    ``None`` if a file with that name already exists and *force* is false."""
+    target = Path(target or policies_dir())
+    src = preset_path(name)
+    dest = target / src.name
+    if dest.exists() and not force:
+        return None
+    target.mkdir(parents=True, exist_ok=True)
+    with resources.as_file(src) as src_file:
+        shutil.copyfile(src_file, dest)
+    return dest

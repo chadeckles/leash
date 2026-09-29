@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
-> Work toward the next PyPI release (0.7) lands on the `next` branch. Nothing below is published yet.
+> Work toward the next PyPI release (0.7) lands on the `next` branch. Nothing below is published yet. Phase status is tracked in [docs/docs/roadmap.md](docs/docs/roadmap.md).
 
 ### Packaging & install (Phase 1)
 - **One package, one install command.** Code now lives in a single `leash` package (`src/leash/`). Install the server and CLI with `uv tool install 'leash[server]'` (or `pipx`/`pip`) and run `leash start`. The `./leash` wrapper, `requirements.txt` and `make install` are gone. Development uses `uv sync --all-extras`.

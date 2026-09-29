@@ -576,13 +576,17 @@ def cmd_allow(args: argparse.Namespace) -> None:
             print(f"  No rules to undo in {target}")
             return
         rule = doc["rules"].pop()
-        # Case-insensitive duplicates are added in pairs; remove the pair.
+        removed = 1
+        # Case-insensitive duplicates are added in pairs; remove the pair and
+        # report the original (the first of the pair).
         while doc["rules"] and doc["rules"][-1].get("reason") == rule.get("reason") and \
                 doc["rules"][-1].get("action") == rule.get("action") and \
                 str(doc["rules"][-1].get("resource", "")).lower() == str(rule.get("resource", "")).lower():
-            doc["rules"].pop()
+            rule = doc["rules"].pop()
+            removed += 1
         _save_my_rules(target, doc)
-        print(f"  ✔ Removed: {rule.get('action')} {rule.get('resource', '')}".rstrip())
+        extra = " (and its lower-case copy)" if removed > 1 else ""
+        print(f"  ✔ Removed: {rule.get('action')} {rule.get('resource', '')}".rstrip() + extra)
         return
 
     e = _flagged_entry(args.which)

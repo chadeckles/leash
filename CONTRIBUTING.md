@@ -69,6 +69,12 @@ uv run pytest --cov=src/leash -v
 
 All tests must pass before submitting.
 
+Tests are data-driven where possible. To pin down how Leash treats a tool
+call (a new evasion, a preset rule, a host quirk), add a line to
+`tests/cases/hook_decisions.yaml` rather than a new test function. Engine and
+server authorization cases live in the `ENGINE_CASES` and `MATRIX` tables in
+`tests/test_engine.py` and `tests/test_policy.py`.
+
 ### 4. Lint
 
 ```bash

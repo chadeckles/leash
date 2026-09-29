@@ -1138,7 +1138,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         else:
             _check("server", "fail", f"Server returned HTTP {resp.status_code}", "critical")
     except Exception:
-        if hooked:
+        if hooked or count:
             _check("server", "info", f"No server at {args.url} (not needed for hooks)")
             _print_doctor(checks, args)
             return

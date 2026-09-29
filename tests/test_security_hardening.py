@@ -33,7 +33,7 @@ def _authorize(client, agent_id, hdr, action, resource=""):
 
 # ── Policy self-grant ─────────────────────────────────────────────────────────
 
-def test_agent_cannot_grant_itself_permissions(client):
+def test_policy_api_privilege_escalation(client):
     aid, hdr = register_agent(client, "rogue-agent")
     assert _authorize(client, aid, hdr, "exec") == "deny"
 
@@ -46,8 +46,7 @@ def test_agent_cannot_grant_itself_permissions(client):
     # Non-admins cannot list, modify, or delete managed policies either
     assert client.get("/policies/managed", headers=hdr).status_code == 403
 
-
-def test_self_restricting_policy_rules(client):
+    # Agents may only create deny-only policies about themselves
     aid, hdr = register_agent(client, "self-restrict-agent")
     other_id, _ = register_agent(client, "self-restrict-other")
 
@@ -73,8 +72,7 @@ def test_self_restricting_policy_rules(client):
     assert resp.status_code == 201
     assert resp.json()["name"] == f"{aid}/openclaw-policy"
 
-
-def test_admin_can_manage_policies(client):
+    # Admins can grant permissions
     aid, hdr = register_agent(client, "admin-managed-agent")
     resp = client.post("/policies/managed", json={
         "name": "admin-grant", "priority": 100, "yaml_content": _allow_all_yaml(aid),
@@ -85,20 +83,13 @@ def test_admin_can_manage_policies(client):
 
 # ── Admin registration / promotion ────────────────────────────────────────────
 
-@pytest.mark.parametrize("agent_type", ["cli", "admin", "ops", "CLI"])
-def test_cannot_self_register_admin_type(client, agent_type):
-    resp = client.post("/agents", json={"name": f"fake-{agent_type}", "agent_type": agent_type})
-    assert resp.status_code == 403
+def test_admin_registration_and_promotion(client):
+    for agent_type in ("cli", "admin", "ops", "CLI"):
+        body = {"name": f"fake-{agent_type}", "agent_type": agent_type}
+        assert client.post("/agents", json=body).status_code == 403, agent_type
+        assert client.post("/agents", json=body, headers={"X-Leash-Admin-Key": "wrong-key"}).status_code == 403
 
-    resp = client.post(
-        "/agents",
-        json={"name": f"fake-{agent_type}", "agent_type": agent_type},
-        headers={"X-Leash-Admin-Key": "wrong-key"},
-    )
-    assert resp.status_code == 403
-
-
-def test_admin_key_allows_admin_registration(client):
+    # The real admin key works
     resp = client.post(
         "/agents",
         json={"name": "real-admin", "agent_type": "cli"},
@@ -106,8 +97,14 @@ def test_admin_key_allows_admin_registration(client):
     )
     assert resp.status_code == 201
 
+    # No self-promotion; ordinary metadata updates still work
+    aid, hdr = register_agent(client, "promote-me")
+    resp = client.patch(f"/agents/{aid}", json={"agent_type": "admin"}, headers=hdr)
+    assert resp.status_code == 403
+    assert client.patch(f"/agents/{aid}", json={"agent_type": "coding"}, headers=hdr).status_code == 200
 
-def test_cannot_impersonate_agent_via_name(client):
+
+def test_agent_identity_cannot_be_impersonated(client):
     victim_id, _ = register_agent(client, "victim-agent")
     attacker_id, attacker_hdr = register_agent(client, "attacker-agent")
     client.post("/policies/managed", json={
@@ -124,8 +121,7 @@ def test_cannot_impersonate_agent_via_name(client):
     assert client.post("/agents", json={"name": victim_id}).status_code == 422
     assert _authorize(client, attacker_id, attacker_hdr, "prod.deploy") == "deny"
 
-
-def test_id_patterns_never_match_by_name():
+    # ID patterns never match by name
     from leash.engine import match_agent as _match_agent
 
     victim = "6f1c2e0a-1111-4222-8333-444455556666"
@@ -134,17 +130,9 @@ def test_id_patterns_never_match_by_name():
     assert _match_agent({"agents": ["*email*"]}, "x", "email-bot")
 
 
-def test_cannot_self_promote_to_admin(client):
-    aid, hdr = register_agent(client, "promote-me")
-    resp = client.patch(f"/agents/{aid}", json={"agent_type": "admin"}, headers=hdr)
-    assert resp.status_code == 403
-    # Non-privileged metadata updates still work
-    assert client.patch(f"/agents/{aid}", json={"agent_type": "coding"}, headers=hdr).status_code == 200
-
-
 # ── Revocation ────────────────────────────────────────────────────────────────
 
-def test_rotated_and_deleted_tokens_are_revoked(client):
+def test_revocation(client, tmp_path):
     aid, old_hdr = register_agent(client, "revoke-me")
     new_token = client.post(f"/agents/{aid}/rotate", headers=old_hdr).json()["token"]
     new_hdr = {"Authorization": f"Bearer {new_token}"}
@@ -158,8 +146,7 @@ def test_rotated_and_deleted_tokens_are_revoked(client):
     assert resp.status_code == 401
     assert resp.json()["detail"].startswith("Token has been revoked")
 
-
-def test_sdk_does_not_reregister_after_revocation(client, tmp_path):
+    # The SDK does not silently re-register after revocation
     agent = LeashAgent("http://testserver", name="sdk-revoked",
                        token_file=tmp_path / "id.json", auto_register=False)
     agent._client = client
@@ -208,7 +195,7 @@ def _call(name, args):
             "params": {"name": name, "arguments": args}}
 
 
-def test_proxy_forwards_resource_and_args():
+def test_mcp_proxy_hardening():
     assert _extract_resources({"path": "/data/x"}) == ["/data/x"]
     assert _extract_resources({"q": 1}) == []
     assert _args_to_context({"path": "/a", "n": 2, "nested": {"x": 1}}) == {"arg.path": "/a", "arg.n": 2}
@@ -221,8 +208,7 @@ def test_proxy_forwards_resource_and_args():
     assert len(sent) == 1 and not errors
     assert agent.audits == []  # server-side /authorize already records the decision
 
-
-def test_proxy_authorizes_every_resource_argument():
+    # Every resource argument is authorized
     class _PerResourceAgent(_FakeAgent):
         def authorize(self, action, resource="", context=None):
             self.calls.append((action, resource, context))
@@ -235,8 +221,7 @@ def test_proxy_authorizes_every_resource_argument():
     assert [c[1] for c in agent.calls] == ["/tmp/a", "/etc/passwd"]
     assert not sent and errors
 
-
-def test_proxy_blocks_tool_changed_mid_session():
+    # Tools whose definition changes mid-session are blocked
     agent = _FakeAgent("allow")
     proxy, sent, errors = _proxy_with(agent)
 

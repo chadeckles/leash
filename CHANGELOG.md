@@ -21,6 +21,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - New docs: [Start Here](docs/docs/start-here.md), a first-15-minutes tutorial with a glossary; the OpenClaw guide is rewritten around the plugin.
 - **Behaviour change: `openclaw` preset rewritten.** It now uses the hook vocabulary (`shell.exec`, `file.*`, `tool.<name>`), applies to `openclaw*` agents, and has no catch-all deny; unmatched calls fall through to `coding-agent`. It denies edits to OpenClaw's config and plugins and reads of its channel credentials, and asks before `tool.gateway`, `tool.nodes`, `tool.cron` and plugin/config commands. `leash install openclaw` backs up the old preset to `~/.leash/backups/`. Server/SDK agents named `openclaw-agent` that relied on the old deny-by-default rules should add their own rules.
 - `coding-agent` preset: applies to `openclaw*`, denies `*leash allow*`, and matches `leash uninstall` anywhere in a command.
+- Test suite consolidated from 102 to 45 tests with no loss of line coverage. Hook decisions are now a YAML case table (`tests/cases/hook_decisions.yaml`, 51 cases); engine and server authorization use inline case tables. Failures list every mismatched case.
+- `leash doctor` no longer fails on a missing server once hooks have been used (even after `leash uninstall`); `leash allow --undo` names the original rule rather than its lower-case copy.
 
 ### Coding-agent hooks (Phase 2)
 - **`leash install`**: one command hooks Leash into **Claude Code, GitHub Copilot CLI, Cursor and Codex**, with no server, registration or token.

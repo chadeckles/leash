@@ -1438,8 +1438,15 @@ def main() -> None:
     hook_p = sub.add_parser("hook", help="Evaluate one agent tool call from stdin (called by the agent's hook)")
     hook_p.add_argument("host", nargs="?", default="auto", choices=("auto",) + HOST_CHOICES)
 
+    def agent_name(value: str) -> str:
+        # Validated here, not via choices=: Python 3.11's argparse rejects an
+        # empty nargs="*" list when choices is set.
+        if value not in HOST_CHOICES:
+            raise argparse.ArgumentTypeError(f"invalid choice: {value!r} (choose from {', '.join(HOST_CHOICES)})")
+        return value
+
     inst_p = sub.add_parser("install", help="Hook Leash into your agents (Claude Code, Copilot CLI, Cursor, Codex, OpenClaw)")
-    inst_p.add_argument("hosts", nargs="*", choices=HOST_CHOICES, metavar="AGENT",
+    inst_p.add_argument("hosts", nargs="*", type=agent_name, metavar="AGENT",
                         help=f"Agents to hook ({', '.join(HOST_CHOICES)}); default: every detected agent")
     inst_p.add_argument("--project", nargs="?", const="", metavar="DIR",
                         help="Write repo-level hook config (commit it) instead of user-level")
@@ -1447,7 +1454,7 @@ def main() -> None:
     inst_p.add_argument("--dry-run", action="store_true", help="Show what would be written")
 
     uninst_p = sub.add_parser("uninstall", help="Remove Leash hooks from coding agents")
-    uninst_p.add_argument("hosts", nargs="*", choices=HOST_CHOICES, metavar="AGENT", help="Agents to unhook (default: all)")
+    uninst_p.add_argument("hosts", nargs="*", type=agent_name, metavar="AGENT", help=f"Agents to unhook ({', '.join(HOST_CHOICES)}); default: all")
     uninst_p.add_argument("--project", nargs="?", const="", metavar="DIR", help="Remove repo-level hook config")
     uninst_p.add_argument("--dry-run", action="store_true", help="Show what would be removed")
 

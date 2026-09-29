@@ -55,6 +55,10 @@ def link_commands() -> List[List[str]]:
     return [["openclaw", "plugins", "install", "--link", str(plugin_dir()), "--force"]]
 
 
+def enable_commands() -> List[List[str]]:
+    return [["openclaw", "plugins", "enable", PLUGIN_ID]]
+
+
 def unlink_commands() -> List[List[str]]:
     return [["openclaw", "plugins", "uninstall", PLUGIN_ID, "--force"]]
 

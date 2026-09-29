@@ -359,6 +359,7 @@ def _install_openclaw(target: Target, command: Optional[str], dry_run: bool) -> 
     linked = openclaw.is_linked()
     link = openclaw.link_commands()
     manual = [f"Link it into OpenClaw: {openclaw.shell_line(c)}" for c in link]
+    manual += [f"Then enable it: {openclaw.shell_line(c)}" for c in openclaw.enable_commands()]
     if files_ok and linked:
         return Result(target, "unchanged")
     action = "installed" if fresh else "updated"
@@ -377,6 +378,12 @@ def _install_openclaw(target: Target, command: Optional[str], dry_run: bool) -> 
                 notes.append(f"`openclaw plugins install` failed: {err}")
                 notes += manual
                 return Result(target, "partial", notes=notes)
+            # Linked plugins may also need enabling; not fatal if this OpenClaw
+            # version enables them on install or lacks the subcommand.
+            ok, err = openclaw.run_cli(openclaw.enable_commands())
+            if not ok:
+                notes.append("Couldn't enable the plugin automatically. If `openclaw plugins list` shows it "
+                             "disabled, run: " + openclaw.shell_line(openclaw.enable_commands()[0]))
         else:
             notes.append("The `openclaw` command isn't on PATH, so the plugin isn't linked yet.")
             notes += manual

@@ -432,6 +432,7 @@ def test_openclaw_install_lifecycle(home, monkeypatch, fake_openclaw):
     assert {"index.js", "openclaw.plugin.json", "package.json", "leash.json"} <= {p.name for p in plugin.iterdir()}
     assert json.loads((plugin / "leash.json").read_text())["command"][-2:] == ["hook", "openclaw"]
     assert "plugins install --link" in fake_openclaw.read_text() and openclaw.is_installed()
+    assert "plugins enable leash" in fake_openclaw.read_text()
     row = next(r for r in inst.status() if r["host"] == "openclaw" and r["scope"] == "user")
     assert row["installed"] and row["detected"]
     assert inst.install("openclaw").action == "unchanged"

@@ -1,17 +1,18 @@
 # Roadmap
 
-Leash is moving from a per-workstation server toward a local, hooks-first
-guardrail that installs in a couple of commands and can optionally join a team
-server. Each phase is merged into the `next` branch and released to PyPI
-together as **v0.7**.
+Leash is moving from a per-workstation server to a local, hooks-first
+guardrail that installs in a couple of commands. It stays a small, focused
+open-source tool: one YAML policy, enforced locally, with a tamper-evident
+audit log, and no hosted service. Each phase is merged into the `next` branch,
+and all of them ship to PyPI together as **v0.7**.
 
 | Phase | Theme | Status |
 |---|---|---|
 | 0 | Security hardening | ✅ Done ([#1](https://github.com/chadeckles/leash/pull/1), merged to `main`) |
 | 1 | Packaging & pure engine | ✅ Done ([#2](https://github.com/chadeckles/leash/pull/2), into `next`) |
-| 2 | Hooks-first: `leash hook` / `leash install <host>` | 🚧 In progress |
-| 3 | MCP SDK proxy & gateway external-authz | ⏳ Planned |
-| 4 | Team mode: signed bundles, OIDC, audit ingest | ⏳ Planned |
+| 2 | Hooks-first: `leash hook` / `leash install <host>` | ✅ Done (PR into `next`) |
+| 3 | Local MCP proxy (no server needed) | ⏳ Planned |
+| 4 | v0.7 release: docs, polish, PyPI | ⏳ Planned |
 
 ## Phase 0 — Security hardening ✅
 - Policy writes are admin-only by default, and admin tokens come from a local admin key.
@@ -35,17 +36,32 @@ together as **v0.7**.
 - State lives in `~/.leash`, matching `~/.claude`, `~/.copilot` and `~/.codex`, instead of platformdirs.
 - There is no `[mcp]` extra yet; the proxy has no extra dependencies until Phase 3.
 
-## Phase 2 — Hooks-first (v0.5 scope)
-- `leash hook <host>` reads the host's pre-tool-use JSON on stdin and maps it to a common action model (`shell.exec`, `file.write`, `mcp.call`, …). It evaluates the local policy with no server needed and writes the decision in the format the host expects.
-- `leash install` / `uninstall <host>` are idempotent and back up existing config.
+## Phase 2 — Hooks-first ✅
+- `leash hook <host>` reads the host's pre-tool-use JSON on stdin and maps it to a common action model (`shell.exec`, `file.write`, `mcp.<server>.<tool>`, …). It evaluates the local policy with no server needed and writes the decision in the format the host expects.
+- `leash install` / `uninstall <host>` are idempotent and back up existing config. There are two scopes: user (default) and `--project`, which writes hook config you can commit to the repo.
 - `leash init --preset`, and a local hash-chained audit log with `leash audit tail`.
 - A new `ask` effect for human-in-the-loop approval on hosts that support it.
+- A `coding-agent` preset, `leash policy test --local`, `leash hosts`, and hook checks in `leash doctor`.
 
-## Phase 3 — MCP & gateways
-- Rebuild the proxy on the official MCP SDK (stdio + Streamable HTTP) and use tool annotations to judge risk.
-- Add an external-authz endpoint for MCP gateways.
+*Deviations from the original plan:* Managed/MDM installs and plugin marketplaces were dropped to keep Leash small (see [Out of scope](#out-of-scope)).
 
-## Phase 4 — Team mode (v0.7+)
-- Signed, versioned policy bundles (pulled, cached, and enforced offline).
-- OIDC login, audit ingest, and OTel GenAI export.
-- Postgres with Alembic migrations.
+## Phase 3 — Local MCP proxy
+Claude Code, Copilot CLI, Cursor and Codex already route MCP tool calls through
+their hooks, so Phase 2 covers MCP for those hosts. The proxy is only for MCP
+clients that have no hooks.
+- The proxy runs locally as a stdio wrapper around the MCP server command (nothing is hosted). It evaluates with the same local engine and audit log as `leash hook`, so it needs no server, token or registration.
+- Tool calls use the same `mcp.<server>.<tool>` actions as hooks, so one policy covers both.
+- `leash mcp wrap` rewrites an MCP client config entry to run through the proxy.
+
+## Phase 4 — v0.7 release
+- Docs pass, migration notes from v0.3, and the PyPI release.
+
+## Out of scope
+To keep Leash small, these are not planned:
+- Managed/MDM fleet installs.
+- Hosted team server, OIDC and signed policy bundles.
+- MCP gateway integrations and a Streamable-HTTP proxy.
+- Plugin marketplaces.
+
+`leash[server]` (API, dashboard, Python SDK) stays available for people who
+already use it, but setup doesn't require it.

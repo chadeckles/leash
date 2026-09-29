@@ -8,6 +8,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 > Work toward the next PyPI release (0.7) lands on the `next` branch. Nothing below is published yet. Phase status is tracked in [docs/docs/roadmap.md](docs/docs/roadmap.md).
 
+### Coding-agent hooks (Phase 2)
+- **`leash install`**: one command hooks Leash into **Claude Code, GitHub Copilot CLI, Cursor and Codex**, with no server, registration or token.
+  - It detects installed agents and merges into their existing hook config, backing it up to `~/.leash/backups/` first.
+  - Re-running it is a no-op. `leash uninstall` removes only Leash's entries.
+  - `--project` writes repo-level config you can commit. `leash hosts` shows what's hooked where.
+- **`leash hook <agent>`**: the hook the agents call before every tool use. It maps the agent's payload to a common action model (`shell.exec`, `file.read/write/delete/search`, `web.fetch`, `agent.spawn`, `mcp.<server>.<tool>`, `tool.<name>`) and evaluates `~/.leash/policies` in-process.
+  - Latency is under 100 ms, including Python start-up.
+  - Shell commands are checked as a whole and as each sub-command, with `sudo`/`env` wrappers removed. File paths are resolved (including symlinks), and file actions get an `in_workspace` condition.
+  - A Leash "allow" never bypasses the agent's own permission prompts.
+  - Fail-closed on internal errors (exit 2). `LEASH_FAIL_OPEN=1` and `LEASH_MODE=observe` are available for rollout.
+- **`coding-agent` preset**:
+  - Blocks destructive commands, credential reads, and edits to Leash or the agent's own hook settings.
+  - Asks before `sudo`, force-push, `git reset --hard`, publishing, infrastructure changes, `.env` reads, and writes outside the workspace.
+  - Allows everything else.
+  - Installed by `leash install` or `leash init --preset coding-agent`; `leash init --list-presets` shows all presets.
+- **New `ask` effect** for human-in-the-loop approval. Claude Code and Copilot CLI prompt the user; Cursor prompts for shell and MCP calls. Codex and the server's `/authorize` treat it as deny (the server returns "Requires human approval: …").
+- **Local audit log** at `~/.leash/audit/audit.jsonl` (0600). It is SHA-256 hash-chained and written under a file lock. New commands: `leash audit tail [-n] [-f] [--json]` and `leash audit verify`.
+- **`leash policy test --local`** evaluates the local policy exactly the way the hooks do. Each `-r/--resource` belongs to the preceding `-a/--action`. `--strict` exits 1 for CI.
+- **`leash doctor`** reports hooked agents, policy coverage per agent, and the local audit chain. A missing server is informational when hooks are installed.
+- Engine additions:
+  - `evaluate(..., normalize=False)` matches shell commands and URLs verbatim.
+  - `FileRateLimiter` keeps `rate_limit` rules working across hook processes.
+  - `PolicyDirectory.policies` is now sorted highest priority first.
+
 ### Packaging & install (Phase 1)
 - **One package, one install command.** Code now lives in a single `leash` package (`src/leash/`). Install the server and CLI with `uv tool install 'leash[server]'` (or `pipx`/`pip`) and run `leash start`. The `./leash` wrapper, `requirements.txt` and `make install` are gone. Development uses `uv sync --all-extras`.
 - **Small core install.** `pip install leash` pulls in only PyYAML and httpx (SDK, CLI, MCP proxy, policy engine). The FastAPI/SQLAlchemy/crypto stack moved to the `[server]` extra. The wheel shrank from ~1.1 MB to ~150 KB.

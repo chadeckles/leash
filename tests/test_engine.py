@@ -98,7 +98,7 @@ def test_policy_directory_reloads_on_change(tmp_path):
 
     time.sleep(0.01)
     (tmp_path / "q.yml").write_text("name: q\npriority: 5\nagents: ['*']\nrules: []\n")
-    assert [p.name for p in directory.policies] == ["p", "q"]
+    assert [p.name for p in directory.policies] == ["q", "p"]  # highest priority first
 
     engine = PolicyEngine.from_directory(tmp_path)
     assert engine.evaluate("x", "a").allowed

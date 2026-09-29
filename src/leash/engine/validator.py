@@ -23,7 +23,7 @@ import yaml
 
 # ── Known fields and their types ───────────────────────────────────────────
 
-_VALID_EFFECTS = {"allow", "deny"}
+_VALID_EFFECTS = {"allow", "deny", "ask"}
 _VALID_MODES = {"enforce", "observe"}
 _VALID_TOP_KEYS = {"name", "description", "priority", "agents", "rules", "owasp", "mode"}
 _VALID_RULE_KEYS = {
@@ -134,7 +134,7 @@ def validate_policy(doc: Dict[str, Any], source: str = "<inline>") -> List[str]:
                 errors.append(f"{prefix}: missing required field 'effect'")
             elif rule["effect"] not in _VALID_EFFECTS:
                 errors.append(
-                    f"{prefix}: 'effect' must be 'allow' or 'deny', "
+                    f"{prefix}: 'effect' must be 'allow', 'deny' or 'ask', "
                     f"got '{rule['effect']}'"
                 )
 

@@ -1,3 +1,3 @@
-from leash.cli import main
+from leash._entry import main
 
 main()

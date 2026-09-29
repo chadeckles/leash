@@ -1,0 +1,400 @@
+# Coding-agent guardrails
+#
+# Used by `leash hook` for Claude Code, GitHub Copilot CLI, Cursor and Codex.
+# Normal development work is allowed; destructive or credential-stealing
+# actions are blocked; risky-but-legitimate actions ask you first.
+#
+# Rules are checked top to bottom and the first match wins, so put
+# exceptions above the rules they override.  Test changes with:
+#
+#   leash policy test --local --agent claude-code -a shell.exec -r "git push --force"
+#
+# Actions: shell.exec, file.read, file.write, file.delete, file.search,
+# web.fetch, web.search, agent.spawn, mcp.<server>.<tool>, tool.<name>.
+# Resources are glob patterns; file paths are absolute. For shell.exec, the
+# full command line and every sub-command (split on ; && || | and $(...))
+# are each checked.
+name: coding-agent
+description: >-
+  Guardrails for AI coding agents: block destructive commands, secret
+  access and tampering with Leash or the agent's hooks; ask before
+  publishing, force-pushing or writing outside the workspace.
+priority: 10
+mode: enforce
+agents:
+  - "claude-code*"
+  - "copilot*"
+  - "cursor*"
+  - "codex*"
+
+rules:
+  # ── Tamper protection: Leash itself and the hosts' hook configuration ──
+  # "file.[wd]*" matches file.write and file.delete.
+  - action: "file.[wd]*"
+    resource: "*/.leash/*"
+    effect: deny
+    reason: "Agents may not modify Leash policies, keys or audit logs"
+    owasp: ["ASI03"]
+  - action: "file.[wd]*"
+    resource: "*/.claude/settings*.json"
+    effect: deny
+    reason: "Agents may not edit their own hook/permission settings"
+    owasp: ["ASI03"]
+  - action: "file.[wd]*"
+    resource: "*/.copilot/hooks/*"
+    effect: deny
+    reason: "Agents may not edit their own hooks"
+    owasp: ["ASI03"]
+  - action: "file.[wd]*"
+    resource: "*/.copilot/settings*.json"
+    effect: deny
+    reason: "Agents may not edit their own hook/permission settings"
+    owasp: ["ASI03"]
+  - action: "file.[wd]*"
+    resource: "*/.cursor/hooks.json"
+    effect: deny
+    reason: "Agents may not edit their own hooks"
+    owasp: ["ASI03"]
+  - action: "file.[wd]*"
+    resource: "*/.codex/hooks.json"
+    effect: deny
+    reason: "Agents may not edit their own hooks"
+    owasp: ["ASI03"]
+  - action: "file.[wd]*"
+    resource: "*/.codex/config.toml"
+    effect: deny
+    reason: "Agents may not edit their own hook/permission settings"
+    owasp: ["ASI03"]
+  - action: "file.[wd]*"
+    resource: "*/.github/hooks/*"
+    effect: ask
+    reason: "Changing repository agent hooks needs your approval"
+    owasp: ["ASI03"]
+  - action: "shell.exec"
+    resource: "leash uninstall*"
+    effect: deny
+    reason: "Agents may not remove Leash"
+    owasp: ["ASI03"]
+  - action: "shell.exec"
+    resource: "*.leash/*"
+    effect: ask
+    reason: "Shell access to ~/.leash needs your approval"
+    owasp: ["ASI03"]
+  - action: "shell.exec"
+    resource: "*.claude/settings*"
+    effect: ask
+    reason: "Shell access to agent settings needs your approval"
+    owasp: ["ASI03"]
+  - action: "shell.exec"
+    resource: "*.copilot/hooks*"
+    effect: ask
+    reason: "Shell access to agent hooks needs your approval"
+    owasp: ["ASI03"]
+  - action: "shell.exec"
+    resource: "*.cursor/hooks.json*"
+    effect: ask
+    reason: "Shell access to agent hooks needs your approval"
+    owasp: ["ASI03"]
+  - action: "shell.exec"
+    resource: "*.codex/hooks.json*"
+    effect: ask
+    reason: "Shell access to agent hooks needs your approval"
+    owasp: ["ASI03"]
+
+  # ── Credentials and secrets ──
+  - action: "file.*"
+    resource: "*/.ssh/*"
+    effect: deny
+    reason: "SSH keys are off-limits to agents"
+    owasp: ["LLM02", "ASI03"]
+  - action: "file.*"
+    resource: "*/.aws/credentials"
+    effect: deny
+    reason: "Cloud credentials are off-limits to agents"
+    owasp: ["LLM02", "ASI03"]
+  - action: "file.*"
+    resource: "*/.config/gcloud/*"
+    effect: deny
+    reason: "Cloud credentials are off-limits to agents"
+    owasp: ["LLM02", "ASI03"]
+  - action: "file.*"
+    resource: "*/.azure/*"
+    effect: deny
+    reason: "Cloud credentials are off-limits to agents"
+    owasp: ["LLM02", "ASI03"]
+  - action: "file.*"
+    resource: "*/.kube/config"
+    effect: deny
+    reason: "Cluster credentials are off-limits to agents"
+    owasp: ["LLM02", "ASI03"]
+  - action: "file.*"
+    resource: "*/.docker/config.json"
+    effect: deny
+    reason: "Registry credentials are off-limits to agents"
+    owasp: ["LLM02", "ASI03"]
+  - action: "file.*"
+    resource: "*/.git-credentials"
+    effect: deny
+    reason: "Git credentials are off-limits to agents"
+    owasp: ["LLM02", "ASI03"]
+  - action: "file.*"
+    resource: "*/.config/gh/hosts.yml"
+    effect: deny
+    reason: "GitHub CLI tokens are off-limits to agents"
+    owasp: ["LLM02", "ASI03"]
+  - action: "file.*"
+    resource: "*/.netrc"
+    effect: deny
+    reason: "Credentials are off-limits to agents"
+    owasp: ["LLM02", "ASI03"]
+  - action: "file.*"
+    resource: "*/.pypirc"
+    effect: deny
+    reason: "Package registry tokens are off-limits to agents"
+    owasp: ["LLM02", "ASI03"]
+  - action: "file.*"
+    resource: "*/.npmrc"
+    effect: ask
+    reason: ".npmrc can contain registry tokens"
+    owasp: ["LLM02"]
+  - action: "file.*"
+    resource: "*/.env"
+    effect: ask
+    reason: ".env files usually contain secrets"
+    owasp: ["LLM02"]
+  - action: "file.*"
+    resource: "*/.env.*"
+    effect: ask
+    reason: ".env files usually contain secrets"
+    owasp: ["LLM02"]
+  - action: "shell.exec"
+    resource: "*.ssh/id_*"
+    effect: deny
+    reason: "SSH private keys are off-limits to agents"
+    owasp: ["LLM02", "ASI03"]
+  - action: "shell.exec"
+    resource: "*.ssh/*"
+    effect: ask
+    reason: "Shell access to ~/.ssh needs your approval"
+    owasp: ["LLM02", "ASI03"]
+  - action: "shell.exec"
+    resource: "*.aws/credentials*"
+    effect: deny
+    reason: "Cloud credentials are off-limits to agents"
+    owasp: ["LLM02", "ASI03"]
+
+  # ── Destructive commands ──
+  - action: "shell.exec"
+    resource: "rm -[rRf]* /"
+    effect: deny
+    reason: "Recursive delete of the filesystem root"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "rm -[rRf]* /[*]"
+    effect: deny
+    reason: "Recursive delete of the filesystem root"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "rm -[rRf]* ~*"
+    effect: deny
+    reason: "Recursive delete of the home directory"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "rm -[rRf]* $HOME*"
+    effect: deny
+    reason: "Recursive delete of the home directory"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "mkfs*"
+    effect: deny
+    reason: "Formatting disks is never an agent task"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "dd *of=/dev/*"
+    effect: deny
+    reason: "Raw writes to devices are never an agent task"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: ":(){*"
+    effect: deny
+    reason: "Fork bomb"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "*curl *|*sh"
+    effect: deny
+    reason: "Piping a download into a shell runs unreviewed code"
+    owasp: ["ASI02", "LLM05"]
+  - action: "shell.exec"
+    resource: "*curl *|*sh -*"
+    effect: deny
+    reason: "Piping a download into a shell runs unreviewed code"
+    owasp: ["ASI02", "LLM05"]
+  - action: "shell.exec"
+    resource: "*wget *|*sh"
+    effect: deny
+    reason: "Piping a download into a shell runs unreviewed code"
+    owasp: ["ASI02", "LLM05"]
+  - action: "shell.exec"
+    resource: "*wget *|*sh -*"
+    effect: deny
+    reason: "Piping a download into a shell runs unreviewed code"
+    owasp: ["ASI02", "LLM05"]
+
+  # ── Risky but sometimes legitimate: ask first ──
+  - action: "shell.exec"
+    resource: "sudo *"
+    effect: ask
+    reason: "Commands run as root need your approval"
+    owasp: ["ASI03"]
+  - action: "shell.exec"
+    resource: "git push*--force*"
+    effect: ask
+    reason: "Force-pushing rewrites shared history"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "git push* -f*"
+    effect: ask
+    reason: "Force-pushing rewrites shared history"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "git push*+*"
+    effect: ask
+    reason: "Force-pushing rewrites shared history"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "git reset --hard*"
+    effect: ask
+    reason: "Discards uncommitted work"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "git clean -*f*"
+    effect: ask
+    reason: "Deletes untracked files"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "git branch -D*"
+    effect: ask
+    reason: "Deletes a branch without merge checks"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "npm publish*"
+    effect: ask
+    reason: "Publishing a package needs your approval"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "pnpm publish*"
+    effect: ask
+    reason: "Publishing a package needs your approval"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "yarn publish*"
+    effect: ask
+    reason: "Publishing a package needs your approval"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "yarn npm publish*"
+    effect: ask
+    reason: "Publishing a package needs your approval"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "cargo publish*"
+    effect: ask
+    reason: "Publishing a package needs your approval"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "poetry publish*"
+    effect: ask
+    reason: "Publishing a package needs your approval"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "uv publish*"
+    effect: ask
+    reason: "Publishing a package needs your approval"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "gem push*"
+    effect: ask
+    reason: "Publishing a package needs your approval"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "twine upload*"
+    effect: ask
+    reason: "Publishing a package needs your approval"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "gh release create*"
+    effect: ask
+    reason: "Creating a release needs your approval"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "gh repo delete*"
+    effect: deny
+    reason: "Deleting repositories is never an agent task"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "docker push*"
+    effect: ask
+    reason: "Pushing images needs your approval"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "kubectl delete*"
+    effect: ask
+    reason: "Deleting cluster resources needs your approval"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "terraform apply*"
+    effect: ask
+    reason: "Changing infrastructure needs your approval"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "terraform destroy*"
+    effect: ask
+    reason: "Destroying infrastructure needs your approval"
+    owasp: ["ASI02"]
+
+  # ── Writes outside the workspace ──
+  - action: "file.*"
+    resource: "/tmp/*"
+    effect: allow
+    reason: "Temporary files"
+  - action: "file.*"
+    resource: "/private/tmp/*"
+    effect: allow
+    reason: "Temporary files"
+  - action: "file.*"
+    resource: "/private/var/folders/*"
+    effect: allow
+    reason: "Temporary files (macOS)"
+  - action: "file.*"
+    resource: "*/.claude/*"
+    effect: allow
+    reason: "Agent's own state directory"
+  - action: "file.*"
+    resource: "*/.copilot/*"
+    effect: allow
+    reason: "Agent's own state directory"
+  - action: "file.*"
+    resource: "*/.cursor/*"
+    effect: allow
+    reason: "Agent's own state directory"
+  - action: "file.*"
+    resource: "*/.codex/*"
+    effect: allow
+    reason: "Agent's own state directory"
+  - action: "file.write"
+    effect: ask
+    reason: "Writing outside the current workspace needs your approval"
+    conditions:
+      in_workspace: false
+    owasp: ["ASI02"]
+  - action: "file.delete"
+    effect: ask
+    reason: "Deleting outside the current workspace needs your approval"
+    conditions:
+      in_workspace: false
+    owasp: ["ASI02"]
+
+  # ── Everything else is normal development work ──
+  - action: "*"
+    effect: allow
+    reason: "Routine development action"

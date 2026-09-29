@@ -7,6 +7,17 @@ Get Leash running and see it make allow/deny decisions in under 2 minutes.
 - Python 3.11+ (macOS ships with 3.9 — run `brew install python@3.12` first if needed)
 - uv (recommended for source installs) or pip/pipx
 
+## Coding agents: two commands
+
+If you want guardrails for Claude Code, Copilot CLI, Cursor or Codex, you don't need a server:
+
+```bash
+uv tool install leash
+leash install
+```
+
+See [Coding Agents (Hooks)](hooks.md). The options below set up the server for the Python SDK, REST API and dashboard.
+
 ## Option 1: Install the server + CLI (Recommended)
 
 ```bash

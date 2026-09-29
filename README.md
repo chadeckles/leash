@@ -25,13 +25,26 @@ One install, one policy file, and your agent is on a leash.
 - 🔗 **Tamper-evident audit trail** — hash-chained and signed; deletions are detectable
 - 👀 **Observe mode** — shadow new rules in production before enforcing
 - 🔍 **Security scanner** — discover an MCP server's tools, classify risk, generate policies
-- 🧩 **Framework-agnostic** — Python SDK, MCP proxy, or plain REST
+- 🤖 **Coding-agent guardrails** — `leash install` hooks Claude Code, Copilot CLI, Cursor and Codex in one command, with no server
+- 🙋 **Ask, don't just deny** — `effect: ask` sends risky actions to the agent's approval prompt
+- 🧩 **Framework-agnostic** — agent hooks, Python SDK, MCP proxy, or plain REST
 - 🧠 **[OpenClaw ready](docs/docs/openclaw-guide.md)** — built-in policies for the popular open-source AI assistant
 - 🛡️ **OWASP mapped** — rules and audit checks reference [OWASP ASI](https://owasp.org/www-project-agentic-security-initiative/) and [LLM Top 10](https://owasp.org/www-project-top-10-for-large-language-model-applications/) threat IDs
 - ⚡ **Small core** — `pip install leash` for SDK/CLI/engine, or `leash[server]` to run the server
 - 📖 **[Full documentation](docs/docs/index.md)** — getting started, policy writing guide, SDK reference, CLI reference, architecture
 
 ## ⬇️ Installation
+
+### Coding agents (Claude Code, Copilot CLI, Cursor, Codex)
+
+```bash
+uv tool install leash    # or: pipx install leash
+leash install            # hooks every coding agent it finds
+```
+
+That's it: no server and no registration. Every shell command, file edit, web fetch and MCP call your agents make is checked against `~/.leash/policies/` before it runs. Destructive commands and credential reads are blocked, and risky actions (force-push, `sudo`, publishing) ask you first. Watch decisions with `leash audit tail -f`. See the [coding agents guide](docs/docs/hooks.md).
+
+### Server (Python SDK, REST API, dashboard)
 
 ```bash
 uv tool install 'leash[server]'
@@ -178,6 +191,10 @@ Rules also support rate limiting, ABAC conditions, and OWASP threat tags — see
 ## 🔍 CLI Cheat Sheet
 
 ```bash
+leash install                             # hook your coding agents (no server)
+leash hosts                               # which agents are hooked
+leash audit tail -f                       # watch local hook decisions
+leash policy test --local -a shell.exec -r "git push --force"
 leash status                              # server health
 leash agents list                         # registered agents
 leash agents register --name "my-bot"     # register a new agent
@@ -203,6 +220,8 @@ Images are published to [GHCR](https://ghcr.io/chadeckles/leash), multi-arch (am
 src/leash/
   __init__.py     ← public SDK exports
   cli.py          ← CLI
+  hooks/          ← coding-agent hook adapters + installer
+  auditlog.py     ← local hash-chained audit log
   client.py       ← Python SDK (LeashAgent)
   mcp_proxy.py    ← MCP authorization proxy
   scanner.py      ← security surface scanner

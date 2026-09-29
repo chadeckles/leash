@@ -61,7 +61,7 @@ Issues = "https://github.com/chadeckles/leash/issues"
 Changelog = "https://github.com/chadeckles/leash/blob/main/CHANGELOG.md"
 
 [project.scripts]
-leash = "leash.cli:main"
+leash = "leash._entry:main"
 leash-mcp-proxy = "leash.mcp_proxy:main"
 
 [tool.hatch.version]

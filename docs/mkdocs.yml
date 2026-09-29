@@ -20,6 +20,7 @@ theme:
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
+  - Coding Agents (Hooks): hooks.md
   - Write Your First Policy: write-your-first-policy.md
   - OpenClaw Integration: openclaw-guide.md
   - MCP Proxy Guide: mcp-proxy-guide.md

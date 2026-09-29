@@ -190,6 +190,19 @@ agent.authorize("file.read", resource="/etc/passwd")          # → deny
 !!! warning "Path traversal protection"
     Leash normalizes resource paths automatically. An agent trying `/data/../../etc/passwd` will be evaluated against `/etc/passwd`, not `/data/*`. You don't need to handle this yourself.
 
+## Asking a Human (`effect: ask`)
+
+Besides `allow` and `deny`, a rule can use `effect: ask`: a person must confirm the action.
+
+```yaml
+- action: "shell.exec"
+  resource: "git push*--force*"
+  effect: ask
+  reason: "Force-pushing rewrites shared history"
+```
+
+With [coding-agent hooks](hooks.md), the agent shows its approval prompt with your reason. Agents that can't prompt, and the server's `/authorize` API, treat `ask` as deny.
+
 ## Rate Limiting
 
 Cap how often an action can happen:

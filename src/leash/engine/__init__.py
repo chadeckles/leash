@@ -12,6 +12,7 @@ database), so it can run inside agent hooks, the CLI, the SDK and the server.
 
 from leash.engine.core import (
     DEFAULT_DENY_REASON,
+    EFFECTS,
     Decision,
     Policy,
     PolicyEngine,
@@ -28,12 +29,14 @@ from leash.engine.matching import (
     match_pattern,
     normalize_resource,
 )
-from leash.engine.ratelimit import InMemoryRateLimiter, RateLimiter
+from leash.engine.ratelimit import FileRateLimiter, InMemoryRateLimiter, RateLimiter
 from leash.engine.validator import validate_policy, validate_policy_file, validate_policy_yaml
 
 __all__ = [
     "DEFAULT_DENY_REASON",
     "Decision",
+    "EFFECTS",
+    "FileRateLimiter",
     "InMemoryRateLimiter",
     "Policy",
     "PolicyDirectory",

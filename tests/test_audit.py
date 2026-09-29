@@ -15,7 +15,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from unittest.mock import patch
 
 from app.core.security import sign_data, hash_data
-from tests.conftest import register_agent
+from tests.conftest import register_agent, admin_headers
 
 
 # ── Helper ────────────────────────────────────────────────────────────────────
@@ -288,7 +288,7 @@ def test_audit_export_jsonl(client):
             '  - action: "read_file"\n    effect: allow\n    reason: "ok"\n'
             '  - action: "delete_file"\n    effect: deny\n    reason: "blocked"'
         ),
-    }, headers=hdr)
+    }, headers=admin_headers(client))
     for _ in range(3):
         client.post("/authorize", json={"agent_id": aid, "action": "read_file"}, headers=hdr)
     client.post("/authorize", json={"agent_id": aid, "action": "delete_file"}, headers=hdr)
@@ -326,7 +326,7 @@ def test_audit_export_jsonl(client):
     client.post("/policies/managed", json={
         "name": f"exp-obs-{obs_id[:8]}", "priority": 100,
         "yaml_content": 'name: obs\nmode: observe\nagents:\n  - "*"\nrules:\n  - action: "danger"\n    effect: deny\n    reason: "observed"',
-    }, headers=obs_h)
+    }, headers=admin_headers(client))
     client.post("/authorize", json={"agent_id": obs_id, "action": "danger"}, headers=obs_h)
     resp = client.get("/audit/export", params={"agent_id": obs_id, "decision": "observe_deny"})
     obs_lines = [json.loads(line) for line in resp.text.strip().split("\n") if line]
@@ -372,7 +372,7 @@ def test_audit_webhooks_and_sinks(client):
             client.post("/policies/managed", json={
                 "name": f"sink-{aid[:8]}", "priority": 100,
                 "yaml_content": 'agents:\n  - "*"\nrules:\n  - action: "read_file"\n    effect: allow\n    reason: "ok"',
-            }, headers=hdr)
+            }, headers=admin_headers(client))
             client.post("/authorize", json={"agent_id": aid, "action": "read_file"}, headers=hdr)
 
             content = open(sink_path).read().strip()

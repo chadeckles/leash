@@ -30,7 +30,14 @@ from app.policy.schemas import (
 
 
 import logging as _logging
+import re as _re
 from copy import deepcopy
+
+_UUID_RE = _re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+def looks_like_agent_id(value: str) -> bool:
+    return bool(_UUID_RE.match(value or ""))
 
 _yaml_policy_cache: Optional[List[Dict[str, Any]]] = None
 _yaml_policy_mtime: Optional[float] = None  # newest mtime of policy dir + files
@@ -219,6 +226,10 @@ def _match_agent(policy: dict, agent_id: str, agent_name: str = "") -> bool:
             return True
         if pattern == agent_id:
             return True
+        # An exact agent_id entry must never match by *name* — otherwise an
+        # agent could rename itself to a victim's UUID and inherit its rules.
+        if looks_like_agent_id(pattern):
+            continue
         # Try matching as a name pattern (exact or glob)
         if agent_name and _match_action(pattern, agent_name):
             return True

@@ -31,6 +31,7 @@ from __future__ import annotations
 import functools
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -56,6 +57,26 @@ class LeashDenied(PermissionError):
             else:
                 parts[-1] += ")"
         super().__init__(" ".join(parts))
+
+
+class LeashRevoked(LeashDenied):
+    """Raised when the server reports this agent's token has been revoked.
+
+    The SDK deliberately does **not** re-register in this case — doing so
+    would let a revoked agent mint itself a fresh identity.  An operator
+    must re-register or rotate the agent.
+    """
+
+
+_REVOKED_MARKER = "Token has been revoked"
+
+
+def _is_revoked(resp: httpx.Response) -> bool:
+    try:
+        detail = resp.json().get("detail", "")
+    except Exception:
+        return False
+    return isinstance(detail, str) and detail.startswith(_REVOKED_MARKER)
 
 
 class LeashAgent:
@@ -141,11 +162,16 @@ class LeashAgent:
 
     def _save_identity(self) -> None:
         if self.token_file and self.agent_id and self.token:
+            self.token_file.parent.mkdir(parents=True, exist_ok=True)
             self.token_file.write_text(json.dumps({
                 "agent_id": self.agent_id,
                 "token": self.token,
                 "name": self.name,
             }, indent=2))
+            try:
+                os.chmod(self.token_file, 0o600)
+            except OSError:
+                pass
 
     def connect(self) -> "LeashAgent":
         """Register with Leash (or load cached identity). Returns self."""
@@ -183,14 +209,18 @@ class LeashAgent:
         if not self.agent_id:
             raise RuntimeError("Agent not connected. Call agent.connect() first.")
 
-    def _reconnect(self) -> None:
+    def _reconnect(self, resp: Optional[httpx.Response] = None, action: str = "") -> None:
         """Silently re-register with Leash and get a fresh JWT.
 
-        Called automatically when a 401 is received, which typically means
-        the token expired or the server signing key was rotated.  The user
-        never sees an error — the request is retried transparently.
+        Called automatically when a 401 is received because the token
+        expired or is otherwise invalid.  If the server says the token was
+        **revoked**, raises :class:`LeashRevoked` instead of re-registering.
         """
-        logger.info("Token expired or revoked — auto-refreshing for '%s'", self.name)
+        if resp is not None and _is_revoked(resp):
+            reason = resp.json().get("detail", "Token has been revoked")
+            logger.error("Leash token for '%s' was revoked — not re-registering", self.name)
+            raise LeashRevoked(action, reason, {})
+        logger.info("Token expired or invalid — auto-refreshing for '%s'", self.name)
         # Clear cached identity so connect() does a fresh registration
         self.agent_id = None
         self.token = None
@@ -222,10 +252,10 @@ class LeashAgent:
             payload["context"] = context
         resp = client.post("/authorize", json=payload, headers=self._headers())
 
-        # Transparent token refresh: if the server says 401, re-register
-        # and retry exactly once.  The user never sees the expiry.
+        # Transparent token refresh: if the server says 401 (expired), re-register
+        # and retry exactly once.  Revoked tokens raise LeashRevoked instead.
         if resp.status_code == 401:
-            self._reconnect()
+            self._reconnect(resp, action)
             payload["agent_id"] = self.agent_id
             resp = client.post("/authorize", json=payload, headers=self._headers())
 
@@ -251,9 +281,9 @@ class LeashAgent:
         }
         resp = client.post("/audit", json=body, headers=self._headers())
 
-        # Transparent token refresh on 401
+        # Transparent token refresh on 401 (revoked tokens raise LeashRevoked)
         if resp.status_code == 401:
-            self._reconnect()
+            self._reconnect(resp, action)
             body["agent_id"] = self.agent_id
             resp = client.post("/audit", json=body, headers=self._headers())
 

@@ -262,7 +262,9 @@ def send(): ...
 result = agent.discover(policy_name="email-bot-policy")
 ```
 
-This is useful for bootstrapping — discover creates the policy skeleton, then you edit the YAML to flip specific tools to `allow`.
+This is useful for bootstrapping: `discover` creates the policy skeleton, then an admin flips specific tools to `allow`.
+
+> **Note:** agents can't grant themselves permissions. Unless the agent holds an admin token, `discover()` only succeeds with `default_effect="deny"` (the generated policy is deny-only and scoped to the agent's own ID). `default_effect="allow"` returns 403. Policy names created by non-admin agents are namespaced as `<agent_id>/<name>`.
 
 ---
 

@@ -11,6 +11,7 @@ import httpx
 import pytest
 
 from sdk.client import LeashAgent, LeashDenied
+from tests.conftest import admin_headers
 
 
 # ── 1. Connect, register, tool decorator lifecycle ───────────────────────────
@@ -46,7 +47,6 @@ def test_sdk_connect_and_tool_decorator(client, auth_header, tmp_path):
     assert agent3.agent_id is not None
 
     # ── Create allow/deny policy ──
-    own_hdr = {"Authorization": f"Bearer {agent.token}"}
     client.post("/policies/managed", json={
         "name": "sdk-tool-policy", "priority": 50,
         "yaml_content": (
@@ -55,7 +55,7 @@ def test_sdk_connect_and_tool_decorator(client, auth_header, tmp_path):
             '  - action: "email.delete"\n    effect: deny\n    reason: "No deleting"\n'
             '  - action: "email.*"\n    effect: allow\n    reason: "Email OK"'
         ),
-    }, headers=own_hdr)
+    }, headers=admin_headers(client))
 
     # ── @tool: allowed ──
     @agent.tool("read_file")
@@ -140,7 +140,6 @@ def test_sdk_guard_and_discover(client, auth_header, tmp_path):
     agent.connect()
 
     # Policy for read_file and email.read_file
-    own_hdr = {"Authorization": f"Bearer {agent.token}"}
     client.post("/policies/managed", json={
         "name": "guard-policy", "priority": 100,
         "yaml_content": (
@@ -148,7 +147,7 @@ def test_sdk_guard_and_discover(client, auth_header, tmp_path):
             '  - action: "read_file"\n    effect: allow\n    reason: "OK"\n'
             '  - action: "email.read_file"\n    effect: allow\n    reason: "OK"'
         ),
-    }, headers=own_hdr)
+    }, headers=admin_headers(client))
 
     # ── guard: allowed ──
     def read_file(path: str):
@@ -201,7 +200,8 @@ def test_sdk_guard_and_discover(client, auth_header, tmp_path):
 
     result = disc_agent.discover(policy_name="test-discover-policy")
     assert "id" in result
-    assert result["name"] == "test-discover-policy"
+    # Non-admin policy names are namespaced under the agent ID
+    assert result["name"] == f"{disc_agent.agent_id}/test-discover-policy"
 
     # Duplicate → returns exists
     result = disc_agent.discover(policy_name="test-discover-policy")

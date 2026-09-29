@@ -104,6 +104,21 @@ def _save_token(agent_id: str, token: str, name: str) -> None:
     os.chmod(_TOKEN_FILE, 0o600)
 
 
+def _admin_key() -> str | None:
+    """Resolve the server's admin bootstrap key (env var, then local key file)."""
+    key = os.getenv("LEASH_ADMIN_KEY", "").strip()
+    if key:
+        return key
+    try:
+        from app.core.config import KEYS_DIR
+        key_file = Path(KEYS_DIR) / "admin.key"
+        if key_file.exists():
+            return key_file.read_text().strip()
+    except Exception:
+        pass
+    return None
+
+
 def _auto_init(base_url: str, name: str = "cli-admin") -> str:
     """Register (or re-use) a CLI agent and cache the token. Returns the JWT."""
     client = _get_client(base_url)
@@ -125,7 +140,11 @@ def _auto_init(base_url: str, name: str = "cli-admin") -> str:
             except Exception:
                 pass  # fall through to fresh registration
 
-        resp = client.post("/agents", json={"name": name, "agent_type": "cli"})
+        admin_headers = {}
+        admin_key = _admin_key()
+        if admin_key:
+            admin_headers["X-Leash-Admin-Key"] = admin_key
+        resp = client.post("/agents", json={"name": name, "agent_type": "cli"}, headers=admin_headers)
         resp.raise_for_status()
     except httpx.ConnectError:
         print(f"Error: Cannot reach Leash at {base_url}", file=sys.stderr)
@@ -133,6 +152,14 @@ def _auto_init(base_url: str, name: str = "cli-admin") -> str:
         sys.exit(1)
     except httpx.HTTPStatusError as e:
         print(f"Error: Registration failed ({e.response.status_code})", file=sys.stderr)
+        if e.response.status_code in (401, 403):
+            print(
+                "  The CLI registers as an admin and needs the server's admin key.\n"
+                "  Run the CLI on the server host (key is read from KEYS_DIR/admin.key),\n"
+                "  or set LEASH_ADMIN_KEY. For Docker:\n"
+                "    export LEASH_ADMIN_KEY=$(docker exec leash-server cat /app/.keys/admin.key)",
+                file=sys.stderr,
+            )
         sys.exit(1)
 
     data = resp.json()

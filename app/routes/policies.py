@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.core.auth import require_policy_admin
+from app.core.auth import is_admin, require_agent, require_policy_admin
 from app.core.config import MAX_POLICY_PRIORITY
 from app.core.database import get_db
 from app.models.policy import Policy
@@ -90,12 +90,38 @@ def _to_response(p: Policy) -> PolicyResponse:
     )
 
 
+def _self_restriction_violation(parsed: dict, agent_id: Optional[str]) -> Optional[str]:
+    """Return why *parsed* is not a safe self-restricting policy, or None.
+
+    Non-admin agents may only create policies that can never widen access:
+    scoped to exactly their own agent_id, deny-only, and enforce mode.
+    """
+    if not agent_id or parsed.get("agents") != [agent_id]:
+        return "policy must target exactly your own agent_id (agents: [\"<your-id>\"])"
+    if parsed.get("mode", "enforce") != "enforce":
+        return "only mode 'enforce' is allowed"
+    rules = parsed.get("rules") or []
+    if any(not isinstance(r, dict) or r.get("effect", "deny") != "deny" for r in rules):
+        return "all rules must have effect 'deny'"
+    return None
+
+
 @router.post("", response_model=PolicyResponse, status_code=201)
 def create_policy(
     body: PolicyCreateRequest,
     db: Session = Depends(get_db),
-    _token: dict = Depends(require_policy_admin),
+    _token: dict = Depends(require_agent),
 ):
+    """Create a managed policy.
+
+    Admin tokens may create any policy.  When LEASH_POLICY_REQUIRE_ADMIN is
+    enabled (the default), non-admin agents may only create self-restricting
+    policies (deny-only, scoped to their own agent_id) — e.g. via
+    ``LeashAgent.discover()``.  An agent can tighten its own leash, never
+    loosen it.  Non-admin policy names are namespaced as ``<agent_id>/<name>``
+    so they can't squat other agents' names or shadow file-based policies.
+    """
+    policy_name = body.name
     if body.priority > MAX_POLICY_PRIORITY:
         raise HTTPException(
             status_code=422,
@@ -123,11 +149,25 @@ def create_policy(
             status_code=422,
             detail={"message": "Invalid policy YAML", "errors": yaml_errors},
         )
-    existing = db.query(Policy).filter(Policy.name == body.name).first()
+    from app.core.config import POLICY_REQUIRE_ADMIN
+    if POLICY_REQUIRE_ADMIN and not is_admin(_token):
+        sub = _token.get("sub")
+        violation = _self_restriction_violation(parsed, sub)
+        if violation:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Non-admin agents may only create self-restricting policies: {violation}",
+            )
+        prefix = f"{sub}/"
+        if not policy_name.startswith(prefix):
+            policy_name = prefix + policy_name
+        if len(policy_name) > 256:
+            raise HTTPException(status_code=422, detail="Policy name too long once namespaced (max 256 chars)")
+    existing = db.query(Policy).filter(Policy.name == policy_name).first()
     if existing is not None:
-        raise HTTPException(status_code=409, detail=f"Policy '{body.name}' already exists")
+        raise HTTPException(status_code=409, detail=f"Policy '{policy_name}' already exists")
     policy = Policy(
-        name=body.name, description=body.description, priority=body.priority,
+        name=policy_name, description=body.description, priority=body.priority,
         yaml_content=body.yaml_content, active=body.active,
     )
     db.add(policy)

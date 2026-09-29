@@ -1,6 +1,10 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
 [project]
 name = "leash"
-version = "0.3.0"
+dynamic = ["version"]
 description = "Leash – AI Agent Identity, Authorization, and Audit Layer"
 readme = "README.md"
 license = "Apache-2.0"
@@ -23,22 +27,29 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Typing :: Typed",
 ]
+# Core: policy engine, CLI, SDK client, MCP proxy.  Kept small so hooks and
+# `uv tool install leash` stay fast.
 dependencies = [
-    "fastapi>=0.104.0",
-    "uvicorn[standard]>=0.24.0",
-    "sqlalchemy>=2.0.0",
-    "pyjwt>=2.8.0",
-    "cryptography>=41.0.0",
     "pyyaml>=6.0.1",
-    "pydantic>=2.5.0",
     "httpx>=0.25.0",
 ]
 
 [project.optional-dependencies]
+# The HTTP server (`leash start`): API, dashboard, database, signed tokens.
+server = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "sqlalchemy>=2.0.0",
+    "pyjwt[crypto]>=2.8.0",
+    "cryptography>=41.0.0",
+    "pydantic>=2.5.0",
+]
+
+[dependency-groups]
 dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.23.0",
-    "ruff>=0.1.0",
+    "ruff>=0.6.0",
 ]
 
 [project.urls]
@@ -49,7 +60,27 @@ Issues = "https://github.com/chadeckles/leash/issues"
 Changelog = "https://github.com/chadeckles/leash/blob/main/CHANGELOG.md"
 
 [project.scripts]
-leash = "sdk.cli:main"
+leash = "leash.cli:main"
+leash-mcp-proxy = "leash.mcp_proxy:main"
 
-[tool.setuptools.packages.find]
-include = ["app*", "sdk*"]
+[tool.hatch.version]
+path = "src/leash/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/leash"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/leash", "tests", "README.md", "LICENSE", "CHANGELOG.md"]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+src = ["src", "tests"]
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

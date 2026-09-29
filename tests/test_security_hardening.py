@@ -14,9 +14,9 @@ from __future__ import annotations
 
 import pytest
 
-from app.core.security import get_admin_key
-from sdk.client import LeashAgent, LeashRevoked
-from sdk.mcp_proxy import MCPProxy, _args_to_context, _extract_resources
+from leash.server.core.security import get_admin_key
+from leash.client import LeashAgent, LeashRevoked
+from leash.mcp_proxy import MCPProxy, _args_to_context, _extract_resources
 from tests.conftest import admin_headers, register_agent
 
 
@@ -126,7 +126,7 @@ def test_cannot_impersonate_agent_via_name(client):
 
 
 def test_id_patterns_never_match_by_name():
-    from app.policy.engine import _match_agent
+    from leash.engine import match_agent as _match_agent
 
     victim = "6f1c2e0a-1111-4222-8333-444455556666"
     assert _match_agent({"agents": [victim]}, victim, "anything")

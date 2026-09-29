@@ -20,6 +20,10 @@ from app.routes.policies import overview_router
 async def lifespan(app: FastAPI):
     """Startup / shutdown hooks."""
     init_db()
+    from app.core.security import get_admin_key, get_admin_key_path
+    get_admin_key()  # ensure the admin bootstrap key exists for `leash init`
+    import logging
+    logging.getLogger("leash").info("Admin key: %s (or LEASH_ADMIN_KEY)", get_admin_key_path())
     yield
 
 

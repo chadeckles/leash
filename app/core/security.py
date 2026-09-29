@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import logging
 import os
+import secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -13,7 +15,7 @@ import jwt
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 
-from app.core.config import JWT_ALGORITHM, JWT_EXPIRATION_HOURS, JWT_ISSUER, KEYS_DIR
+from app.core.config import ADMIN_KEY, JWT_ALGORITHM, JWT_EXPIRATION_HOURS, JWT_ISSUER, KEYS_DIR
 
 _logger = logging.getLogger("leash.security")
 
@@ -173,6 +175,49 @@ def get_server_key_info() -> dict:
         info["needs_rotation"] = age_days > 90
     info["has_previous_key"] = prev_pub_path.exists()
     return info
+
+
+# ---------------------------------------------------------------------------
+# Admin bootstrap key
+# ---------------------------------------------------------------------------
+
+ADMIN_KEY_FILENAME = "admin.key"
+
+
+def get_admin_key_path() -> Path:
+    return Path(KEYS_DIR) / ADMIN_KEY_FILENAME
+
+
+def get_admin_key() -> str:
+    """Return the admin bootstrap key, generating it on first use.
+
+    ``LEASH_ADMIN_KEY`` takes precedence.  Otherwise the key is read from
+    (or created at) ``KEYS_DIR/admin.key`` with mode 0600, so only the
+    user running the server — not an arbitrary agent talking HTTP — can
+    mint admin identities.
+    """
+    if ADMIN_KEY:
+        return ADMIN_KEY
+    path = get_admin_key_path()
+    if path.exists():
+        return path.read_text().strip()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    key = secrets.token_urlsafe(32)
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return path.read_text().strip()
+    with os.fdopen(fd, "w") as f:
+        f.write(key)
+    _logger.info("Generated admin bootstrap key at %s", path)
+    return key
+
+
+def verify_admin_key(candidate: "str | None") -> bool:
+    """Constant-time comparison of *candidate* against the admin key."""
+    if not candidate:
+        return False
+    return hmac.compare_digest(candidate.encode(), get_admin_key().encode())
 
 
 # ---------------------------------------------------------------------------

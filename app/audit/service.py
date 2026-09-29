@@ -63,11 +63,12 @@ def log_authorize_decision(db: Session, request, result) -> None:
         if observation:
             outputs["observation"] = observation
 
+        context = getattr(request, "context", None)
         entry_data = {
             "agent_id": request.agent_id,
             "timestamp": now.isoformat(),
             "action": action_str,
-            "inputs": {"resource": resource, "context": request.context} if resource else None,
+            "inputs": {"resource": resource, "context": context} if (resource or context) else None,
             "outputs": outputs,
             "policy_decision": audit_decision,
             "prev_hash": prev_hash,

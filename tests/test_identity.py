@@ -11,6 +11,7 @@ import jwt
 
 from app.core.config import JWT_ALGORITHM, JWT_ISSUER
 from app.core.security import get_server_private_key, get_server_public_key
+from tests.conftest import admin_headers
 
 
 def test_agent_lifecycle(client, auth_header):
@@ -87,7 +88,7 @@ def test_agent_lifecycle(client, auth_header):
     assert len(data["agents"]) == 1
 
     # ── Not-found guards ──
-    fake_hdr = auth_header  # sub='test-agent-id', never registered
+    fake_hdr = auth_header  # admin token; 'test-agent-id' is never registered
     assert client.get("/agents/test-agent-id", headers=fake_hdr).status_code == 404
     assert client.post("/agents/test-agent-id/rotate", headers=fake_hdr).status_code == 404
     assert client.patch("/agents/test-agent-id", json={"vendor": "x"}, headers=fake_hdr).status_code == 404
@@ -174,9 +175,7 @@ def test_server_key_rotation_graceful(client):
 
     # ── 8. Admin API endpoint works ──
     # Register a CLI admin agent so we have a valid admin token
-    resp = client.post("/agents", json={"name": "key-rot-admin", "agent_type": "cli"})
-    admin_token = resp.json()["token"]
-    admin_hdr = {"Authorization": f"Bearer {admin_token}"}
+    admin_hdr = admin_headers(client, "key-rot-admin")
 
     # Key info endpoint
     info_resp = client.get("/admin/key-info", headers=admin_hdr)

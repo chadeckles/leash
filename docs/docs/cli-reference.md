@@ -36,6 +36,8 @@ export LEASH_URL=http://my-leash:8000
 
 The CLI automatically registers a `cli-admin` agent and caches the token to `~/.leash/token.json` on first use. You don't need to run `init` unless you want a custom agent name.
 
+Registering the CLI's admin identity requires the server's **admin key**. When the CLI runs on the same host as the server it reads the key from `KEYS_DIR/admin.key` automatically. Otherwise, set `LEASH_ADMIN_KEY` (for Docker: `export LEASH_ADMIN_KEY=$(docker exec leash-server cat /app/.keys/admin.key)`).
+
 ---
 
 ## leash init

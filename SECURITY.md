@@ -202,9 +202,10 @@ curl http://localhost:8000/admin/key-info
 |-------------|-------------|---------------|
 | Agent with valid JWT (not expired) | JWT verified via previous key — **still works** | None (auto-heals) |
 | Agent JWT expires naturally | SDK auto-reconnects on 401 — **invisible to user** | None (automatic) |
+| Agent token **revoked** (agent key rotated or agent deleted) | SDK raises `LeashRevoked` and does **not** re-register | Operator re-registers the agent |
 | CLI token expires | `leash` commands auto-refresh on next use | None (automatic) |
 | Force immediate refresh | `leash agents register --name <agent> --force` | Manual |
-| SDK `LeashAgent` in code | Auto-reconnects on 401 → new JWT | None |
+| SDK `LeashAgent` in code | Auto-reconnects on expired-token 401 → new JWT | None |
 | Audit entries signed by old key | Verified via previous public key | None |
 
 ## Production Hardening Checklist
@@ -215,7 +216,8 @@ Before deploying Leash to any network-accessible environment:
 |---------|---------|-------------------|-----|
 | **Require auth for registration** | `LEASH_REQUIRE_AUTH_REGISTER=true` | `true` | Prevents anonymous agent creation |
 | **Require auth for read endpoints** | `LEASH_REQUIRE_AUTH_READ=true` | `true` | Protects audit export, metrics, overview |
-| **Require admin for policy mgmt** | `LEASH_POLICY_REQUIRE_ADMIN=true` | `true` | Restricts policy CRUD to admin tokens |
+| **Require admin for policy mgmt** | `LEASH_POLICY_REQUIRE_ADMIN=true` | `true` (default) | Restricts policy CRUD to admin tokens. Non-admin agents can only create deny-only policies scoped to themselves. **Never disable outside a throwaway sandbox**: it lets any agent grant itself any permission. |
+| **Admin bootstrap key** | `LEASH_ADMIN_KEY` | Auto-generated at `KEYS_DIR/admin.key` (0600) | Required (as `X-Leash-Admin-Key`) to register admin-type agents (`cli`/`admin`/`ops`) |
 | **JWT expiration** | `JWT_EXPIRATION_HOURS=168` | `168` (7 days) | Workweek-friendly; SDK auto-refreshes on expiry |
 | **CORS origins** | `LEASH_CORS_ORIGINS=http://localhost:8000` | Your origins only | Prevents cross-origin attacks |
 | **Keys directory** | `KEYS_DIR=/app/.keys` | Docker volume | Persists signing keys across restarts |
@@ -238,7 +240,8 @@ docker compose up -d
 # 1. Start the server
 docker compose up -d
 
-# 2. Initialize your admin CLI token
+# 2. Initialize your admin CLI token (needs the server's admin key)
+export LEASH_ADMIN_KEY=$(docker exec leash-server cat /app/.keys/admin.key)
 leash init --name ops-admin
 
 # 3. Verify everything is healthy

@@ -5,7 +5,21 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+import uuid
+
+from pydantic import BaseModel, Field, field_validator
+
+
+def _reject_id_like_name(value: Optional[str]) -> Optional[str]:
+    """Agent names must not look like agent IDs — policies reference agents
+    by ID, and an ID-shaped name could be used to impersonate another agent."""
+    if value is None:
+        return value
+    try:
+        uuid.UUID(value.strip())
+    except ValueError:
+        return value
+    raise ValueError("agent name must not be a UUID")
 
 
 # ── Requests ──────────────────────────────────────────────────────────────────
@@ -17,6 +31,8 @@ class AgentCreateRequest(BaseModel):
     description: Optional[str] = Field(None, description="Free-text description of the agent's purpose")
     tags: Optional[List[str]] = Field(None, description="Arbitrary labels for grouping (e.g. production, backend-team)")
 
+    _check_name = field_validator("name")(_reject_id_like_name)
+
 
 class AgentUpdateRequest(BaseModel):
     """PATCH body – every field optional, only supplied fields are updated."""
@@ -25,6 +41,8 @@ class AgentUpdateRequest(BaseModel):
     agent_type: Optional[str] = Field(None, max_length=128)
     description: Optional[str] = None
     tags: Optional[List[str]] = None
+
+    _check_name = field_validator("name")(_reject_id_like_name)
 
 
 # ── Responses ─────────────────────────────────────────────────────────────────

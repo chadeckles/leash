@@ -21,7 +21,7 @@ from sdk.scanner import (
     format_scan_table,
     MCPScanner,
 )
-from tests.conftest import register_agent
+from tests.conftest import register_agent, admin_headers
 
 
 FILESYSTEM_TOOLS = [
@@ -197,7 +197,7 @@ def test_scanner_api_and_mcp(client, db_session):
                 effect: allow
                 reason: "scoped"
         """),
-    }, headers=hdr)
+    }, headers=admin_headers(client))
     resp = client.post("/scan", json={"tools": FILESYSTEM_TOOLS, "agent_id": aid}, headers=hdr)
     covered_names = {t["name"] for t in resp.json()["tools"] if t["has_policy_coverage"]}
     assert "read_file" in covered_names

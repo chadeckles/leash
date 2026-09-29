@@ -53,11 +53,52 @@ import logging
 import subprocess
 import sys
 import threading
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from sdk.client import LeashAgent
 
 logger = logging.getLogger("leash.mcp_proxy")
+
+# Argument names that commonly carry a resource a tool acts on.  Every one
+# present is authorized as a ``resource`` so policy ``resource:`` globs apply
+# (e.g. both ``source`` and ``destination`` of a move must be allowed).
+_RESOURCE_ARG_KEYS = (
+    "path", "paths", "file_path", "filepath", "filename", "file",
+    "uri", "url", "directory", "dir", "source", "destination",
+)
+
+
+def _extract_resources(tool_args: Any) -> List[str]:
+    if not isinstance(tool_args, dict):
+        return []
+    found: List[str] = []
+    for key in _RESOURCE_ARG_KEYS:
+        value = tool_args.get(key)
+        values = value if isinstance(value, list) else [value]
+        for v in values:
+            if isinstance(v, str) and v and v not in found:
+                found.append(v)
+    return found
+
+
+def _args_to_context(tool_args: Any) -> Dict[str, Any]:
+    """Expose scalar tool arguments to policy conditions as ``arg.<name>``.
+
+    Arguments are model-controlled, so they are namespaced to avoid being
+    confused with trusted context keys (e.g. ``user_role``).
+    """
+    if not isinstance(tool_args, dict):
+        return {}
+    return {
+        f"arg.{k}": v for k, v in tool_args.items()
+        if isinstance(v, (str, int, float, bool))
+    }
+
+
+def _default_token_file(agent_name: str) -> Path:
+    safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in agent_name)
+    return Path.home() / ".leash" / f"mcp_{safe}.json"
 
 
 class MCPProxy:
@@ -73,18 +114,22 @@ class MCPProxy:
         agent_name: str = "mcp-proxy",
         on_deny: str = "error",
         auto_discover: bool = True,
+        on_tool_change: str = "block",
     ):
         self.upstream_cmd = upstream_cmd
         self.leash_url = leash_url
         self.agent_name = agent_name
         self.on_deny = on_deny
         self.auto_discover = auto_discover
+        self.on_tool_change = on_tool_change
 
         self._agent: Optional[LeashAgent] = None
         self._upstream: Optional[subprocess.Popen] = None
         self._discovered_tools: Dict[str, Any] = {}
         self._tool_hashes: Dict[str, str] = {}  # tool_name → SHA-256 of description
         self._tools_seen: bool = False  # True after first tools/list response
+        # Tools whose description/schema changed mid-session (possible rug-pull)
+        self._quarantined: set[str] = set()
 
     def start(self) -> None:
         """Start the upstream MCP server and begin proxying."""
@@ -92,7 +137,7 @@ class MCPProxy:
         self._agent = LeashAgent(
             self.leash_url,
             name=self.agent_name,
-            token_file=f".leash_mcp_{self.agent_name}.json",
+            token_file=_default_token_file(self.agent_name),
         )
         self._agent.connect()
         logger.info("Connected to Leash as %s", self._agent.agent_id)
@@ -179,9 +224,26 @@ class MCPProxy:
 
         assert self._agent is not None
 
-        # Authorize with Leash
+        if tool_name in self._quarantined and self.on_tool_change == "block":
+            logger.warning("BLOCKED: %s — tool definition changed mid-session (ASI04)", tool_name)
+            self._send_client_error(
+                msg_id,
+                f"Leash blocked '{tool_name}': tool description/schema changed "
+                f"mid-session (possible tool poisoning). Restart the session to re-trust it.",
+            )
+            return True
+
+        # Authorize with Leash — once per resource argument; all must be
+        # allowed.  The server records every decision (including resource +
+        # argument context) in the audit trail, so no separate /audit call
+        # is needed here.
+        context = _args_to_context(tool_args) or None
         try:
-            auth = self._agent.authorize(tool_name)
+            auth: Dict[str, Any] = {"decision": "deny"}
+            for resource in _extract_resources(tool_args) or [""]:
+                auth = self._agent.authorize(tool_name, resource=resource, context=context)
+                if auth.get("decision", "deny") != "allow":
+                    break
         except Exception as exc:
             logger.error("Leash authorization failed: %s", exc)
             # Fail-closed: deny if Leash is unreachable
@@ -196,26 +258,13 @@ class MCPProxy:
         if decision != "allow":
             reason = auth.get("reason", "denied by policy")
             logger.warning("DENIED: %s → %s", tool_name, reason)
-
-            # Audit the denial
-            try:
-                self._agent.audit(tool_name, "deny", inputs={"arguments": tool_args})
-            except Exception:
-                pass
-
             self._send_client_error(
                 msg_id,
                 f"Leash denied '{tool_name}': {reason}",
             )
             return True
 
-        # Allowed — audit and forward to upstream
         logger.info("ALLOWED: %s", tool_name)
-        try:
-            self._agent.audit(tool_name, "allow", inputs={"arguments": tool_args})
-        except Exception:
-            pass
-
         self._send_upstream(msg)
         return True
 
@@ -253,6 +302,7 @@ class MCPProxy:
                 old_hash = self._tool_hashes.get(name)
                 if old_hash and old_hash != h:
                     changed_tools.append(name)
+                    self._quarantined.add(name)
                     logger.warning(
                         "TOOL POISONING DETECTED: '%s' description/schema changed "
                         "mid-session (ASI04). old=%s new=%s",
@@ -354,6 +404,13 @@ def main() -> None:
         help="Behaviour on deny: return error or empty result",
     )
     parser.add_argument(
+        "--on-tool-change",
+        choices=["block", "warn"],
+        default="block",
+        help="When a tool's description/schema changes mid-session: block further "
+             "calls to it (default) or only warn",
+    )
+    parser.add_argument(
         "--no-auto-discover",
         action="store_true",
         help="Don't auto-create a policy from discovered tools",
@@ -386,6 +443,7 @@ def main() -> None:
         agent_name=args.agent_name,
         on_deny=args.on_deny,
         auto_discover=not args.no_auto_discover,
+        on_tool_change=args.on_tool_change,
     )
 
     try:

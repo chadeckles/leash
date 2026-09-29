@@ -6,7 +6,7 @@ Replaces: test_policy.py (31), test_observe_mode.py (16), test_edge_cases.py (4)
 
 from __future__ import annotations
 
-from tests.conftest import register_agent
+from tests.conftest import register_agent, admin_headers
 
 SAMPLE_YAML = """
 agents:
@@ -38,7 +38,7 @@ def test_authorize_allow_deny_default(client):
             '  - action: "read_file"\n    effect: allow\n    reason: "May read"\n'
             '  - action: "delete_file"\n    effect: deny\n    reason: "No deletes"'
         ),
-    }, headers=hdr)
+    }, headers=admin_headers(client))
 
     # ── Allow ──
     data = client.post("/authorize", json={"agent_id": aid, "action": "read_file"}, headers=hdr).json()
@@ -119,7 +119,7 @@ def test_policy_crud_lifecycle(client, auth_header):
     client.post("/policies/managed", json={
         "name": "db-search", "priority": 100,
         "yaml_content": 'agents:\n  - "*"\nrules:\n  - action: "web_search"\n    effect: allow\n    reason: "DB policy permits searching"',
-    }, headers=hdr)
+    }, headers=admin_headers(client))
     data = client.post("/authorize", json={"agent_id": aid, "action": "web_search"}, headers=hdr).json()
     assert data["decision"] == "allow"
     assert "DB policy" in data["reason"]
@@ -129,7 +129,7 @@ def test_policy_crud_lifecycle(client, auth_header):
     client.post("/policies/managed", json={
         "name": "moon-policy", "priority": 100, "active": False,
         "yaml_content": 'agents:\n  - "*"\nrules:\n  - action: "export_data"\n    effect: allow\n    reason: "Go"',
-    }, headers=hdr2)
+    }, headers=admin_headers(client))
     assert client.post("/authorize", json={"agent_id": aid2, "action": "export_data"}, headers=hdr2).json()["decision"] == "deny"
 
     # ── Update ──
@@ -166,7 +166,7 @@ def test_wildcard_and_glob_matching(client):
             '  - action: "file.read.*"\n    effect: allow\n    reason: "Read any file type"\n'
             '  - action: "access_file"\n    resource: "/data/*"\n    effect: allow\n    reason: "Data dir only"'
         ),
-    }, headers=hdr)
+    }, headers=admin_headers(client))
 
     # Matches
     assert client.post("/authorize", json={"agent_id": aid, "action": "email.read"}, headers=hdr).json()["decision"] == "allow"
@@ -209,7 +209,7 @@ def test_rate_limiting(client):
             '  - action: "limited.call"\n    effect: allow\n'
             '    reason: "Max 2"\n    rate_limit:\n      max_calls: 2\n      window: 3600'
         ),
-    }, headers=hdr_a)
+    }, headers=admin_headers(client))
 
     # Agent A: first call allowed
     assert client.post("/authorize", json={"agent_id": aid_a, "action": "limited.call"}, headers=hdr_a).json()["decision"] == "allow"
@@ -245,7 +245,7 @@ def test_abac_conditions(client):
             '  - action: "db.write"\n    effect: allow\n    reason: "Admin eng only"\n'
             '    conditions:\n      user_role: "admin"\n      department: "eng-*"'
         ),
-    }, headers=hdr)
+    }, headers=admin_headers(client))
 
     # Match
     assert client.post("/authorize", json={"agent_id": aid, "action": "db.query", "context": {"user_role": "analyst"}}, headers=hdr).json()["decision"] == "allow"
@@ -275,7 +275,7 @@ def test_observe_mode_full_cycle(client):
     )
     client.post("/policies/managed", json={
         "name": "obs-test", "priority": 100, "yaml_content": OBSERVE_YAML,
-    }, headers=hdr)
+    }, headers=admin_headers(client))
 
     # ── Observe-mode deny returns allow + observation ──
     data = client.post("/authorize", json={"agent_id": aid, "action": "delete_file"}, headers=hdr).json()
@@ -309,7 +309,7 @@ def test_observe_mode_full_cycle(client):
     client.post("/policies/managed", json={
         "name": "enf-test", "priority": 200,
         "yaml_content": f'name: enf\nmode: enforce\npriority: 200\nagents:\n  - "{aid2}"\nrules:\n  - action: "delete_file"\n    effect: deny\n    reason: "Blocked"',
-    }, headers=hdr2)
+    }, headers=admin_headers(client))
     data = client.post("/authorize", json={"agent_id": aid2, "action": "delete_file"}, headers=hdr2).json()
     assert data["decision"] == "deny"
     assert data["observation"] is None
@@ -319,7 +319,7 @@ def test_observe_mode_full_cycle(client):
     client.post("/policies/managed", json={
         "name": "nomode-test", "priority": 200,
         "yaml_content": f'name: nm\npriority: 200\nagents:\n  - "{aid3}"\nrules:\n  - action: "delete_file"\n    effect: deny\n    reason: "Blocked"',
-    }, headers=hdr3)
+    }, headers=admin_headers(client))
     assert client.post("/authorize", json={"agent_id": aid3, "action": "delete_file"}, headers=hdr3).json()["decision"] == "deny"
 
 
@@ -389,7 +389,7 @@ def test_owasp_tags(client):
             '  - action: "tagged.action"\n    effect: allow\n    reason: "Tagged"\n'
             '    owasp: ["LLM06", "LLM10"]'
         ),
-    }, headers=hdr)
+    }, headers=admin_headers(client))
     data = client.post("/authorize", json={"agent_id": aid, "action": "tagged.action"}, headers=hdr).json()
     assert "LLM06" in data["owasp"] and "LLM10" in data["owasp"]
 
@@ -401,7 +401,7 @@ def test_owasp_tags(client):
             'agents:\n  - "*"\nowasp: ["LLM06"]\nrules:\n'
             '  - action: "plvl.action"\n    effect: allow\n    reason: "Policy tags"'
         ),
-    }, headers=hdr2)
+    }, headers=admin_headers(client))
     data = client.post("/authorize", json={"agent_id": aid2, "action": "plvl.action"}, headers=hdr2).json()
     assert data["owasp"] == ["LLM06"]
 
@@ -420,7 +420,7 @@ def test_resource_traversal_blocked(client):
             'agents:\n  - "*"\nrules:\n'
             '  - action: "access_file"\n    resource: "/data/*"\n    effect: allow\n    reason: "Data only"'
         ),
-    }, headers=hdr)
+    }, headers=admin_headers(client))
 
     assert client.post("/authorize", json={"agent_id": aid, "action": "access_file", "resource": "/data/../../etc/passwd"}, headers=hdr).json()["decision"] == "deny"
     assert client.post("/authorize", json={"agent_id": aid, "action": "access_file", "resource": "/data/%2e%2e/etc/passwd"}, headers=hdr).json()["decision"] == "deny"

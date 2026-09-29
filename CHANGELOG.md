@@ -4,6 +4,28 @@ All notable changes to Leash will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Security
+- **Privilege escalation fixed**: any registered agent could create a managed policy granting itself `allow *`. `LEASH_POLICY_REQUIRE_ADMIN` now defaults to **on**. Non-admin agents may only create *self-restricting* policies (deny-only, enforce mode, scoped to their own `agent_id`), which keeps `LeashAgent.discover()` and MCP auto-discovery working.
+- **Self-declared admin fixed**: registering or PATCHing an agent with `agent_type` `cli`/`admin`/`ops` now requires an admin JWT or the new `X-Leash-Admin-Key` header. The key comes from `LEASH_ADMIN_KEY` or is auto-generated at `KEYS_DIR/admin.key` (0600). `LEASH_REQUIRE_AUTH_REGISTER=true` now requires that same admin credential, as its documentation already stated.
+- **Policy name squatting/shadowing fixed**: policies created by non-admins are stored as `<agent_id>/<name>`, so they can't override a YAML policy or pre-claim another agent's `discover()` name.
+- **Agent impersonation via name fixed**: policy `agents:` entries that look like agent IDs now match only the real `agent_id`, never a name. Agent names shaped like UUIDs are rejected (422), and non-admins can no longer rename themselves.
+- **Revocation is enforced**: tokens for deleted agents are rejected. The token-version check now fails closed (503) on DB errors, applies to policy-admin and optional-auth endpoints, and uses the request's DB session.
+- **SDK no longer bypasses revocation**: on a *revoked* token the SDK raises the new `LeashRevoked` instead of silently re-registering. Expired tokens still auto-refresh. Identity files are written with mode 0600.
+- **MCP proxy**: tool arguments are now evaluated. Every resource-like argument (`path`, `source`, `destination`, `paths[]`, …) is authorized, and the call is denied if any resource is denied, and scalar args are exposed as `arg.<name>` context. Previously `resource:` rules never applied to MCP calls. Tools whose description or schema changes mid-session are now **blocked** (`--on-tool-change block|warn`). The proxy identity is stored in `~/.leash/mcp_<name>.json` instead of the current directory.
+
+### Changed
+- Removed the duplicate audit entry the MCP proxy wrote after every `/authorize`. `/authorize` audit entries now also record `context` when no `resource` is given.
+- The CLI sends the admin key when auto-registering its `cli` identity.
+
+### Upgrade notes
+- Any `cli`/`admin`/`ops` tokens issued by earlier versions may have been self-minted. Rotate server keys (`leash server rotate-keys`) and re-run `leash init` with the admin key.
+- `discover()` results for non-admin agents now carry namespaced names (`<agent_id>/<name>`).
+- If you relied on non-admin agents creating allow policies, create them with an admin token instead. Setting `LEASH_POLICY_REQUIRE_ADMIN=false` restores the old, unsafe behavior.
+
+---
+
 ## [0.3.0] — 2026-04-06
 
 ### Fixed

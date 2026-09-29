@@ -2,10 +2,18 @@
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
-from app.core.auth import enforce_identity, optional_agent, require_agent
+from app.core.auth import (
+    ADMIN_KEY_HEADER,
+    enforce_identity,
+    has_admin_key,
+    is_admin,
+    is_admin_type,
+    optional_agent,
+    require_agent,
+)
 from app.core.database import get_db
 from app.core.metrics import METRICS
 from app.identity import service
@@ -25,22 +33,38 @@ router = APIRouter(prefix="/agents", tags=["Identity"])
 @router.post("", response_model=AgentTokenResponse, status_code=201)
 def create_agent(
     body: AgentCreateRequest,
+    request: Request,
     db: Session = Depends(get_db),
     _token: Optional[dict] = Depends(optional_agent),
 ):
     """Register a new agent and return its signed identity token.
 
-    When LEASH_REQUIRE_AUTH_REGISTER=true, a valid admin JWT is required.
-    Otherwise open registration (suitable for single-user / dev mode).
+    Admin-type agents (``agent_type`` of cli/admin/ops) can only be
+    registered by a caller holding an admin JWT or the ``X-Leash-Admin-Key``
+    header.  When LEASH_REQUIRE_AUTH_REGISTER=true, the same admin
+    credential is required for *every* registration.
     """
     from app.core.config import REQUIRE_AUTH_REGISTER
-    if REQUIRE_AUTH_REGISTER:
-        if _token is None:
+    admin_ok = is_admin(_token) or has_admin_key(request)
+    if REQUIRE_AUTH_REGISTER and not admin_ok:
+        if _token is None and ADMIN_KEY_HEADER.lower() not in request.headers:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Agent registration requires authentication (LEASH_REQUIRE_AUTH_REGISTER=true)",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Agent registration requires an admin JWT or the X-Leash-Admin-Key header",
+        )
+    if is_admin_type(body.agent_type) and not admin_ok:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                f"Registering an admin-type agent ('{body.agent_type}') requires an admin JWT "
+                f"or the {ADMIN_KEY_HEADER} header"
+            ),
+        )
     METRICS.inc("agents_registered_total")
     return service.create_agent(
         db,
@@ -90,8 +114,22 @@ def update_agent(
     db: Session = Depends(get_db),
     _token: dict = Depends(require_agent),
 ):
-    """Update agent metadata (vendor, tags, etc.). Requires valid JWT, own agent only."""
+    """Update agent metadata (vendor, tags, etc.). Requires valid JWT, own agent only.
+
+    Only admins may rename an agent (names drive policy matching) or
+    promote it to an admin type (cli/admin/ops).
+    """
     enforce_identity(_token, agent_id)
+    if body.name is not None and not is_admin(_token):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can rename an agent (names are used for policy matching)",
+        )
+    if is_admin_type(body.agent_type) and not is_admin(_token):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can assign an admin agent_type (cli/admin/ops)",
+        )
     result = service.update_agent(db, agent_id, body)
     if result is None:
         raise HTTPException(status_code=404, detail="Agent not found")

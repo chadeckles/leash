@@ -160,6 +160,11 @@ In Cursor, go to **Settings → MCP** and add a server. The command format is th
 
 MCP tool names become Leash action names. If your MCP server exposes a tool called `read_file`, that's the action you write rules for.
 
+The proxy also passes the call's arguments to the policy engine:
+
+- **Resource**: every value of `path`, `file_path`, `filepath`, `filename`, `file`, `uri`, `url`, `directory`, `dir`, `source`, `destination` (and each entry of a `paths` list) is authorized as a separate `resource`. The call is denied if any one of them is denied (so `move_file /tmp/a → /etc/passwd` can't slip through), and `resource:` globs (e.g. `/data/*`) apply. Paths are normalized server-side (`..` and `%2e%2e` traversal is resolved).
+- **Conditions**: scalar arguments are exposed as `arg.<name>` context keys, e.g. `conditions: {arg.path: "/data/*"}`. They're namespaced because arguments are model-controlled and shouldn't be confused with trusted context.
+
 ### Filesystem Server Tools
 
 The `@modelcontextprotocol/server-filesystem` server exposes:
@@ -267,7 +272,7 @@ rules:
 
 ## Auto-Discovery
 
-When the proxy starts, it discovers the tools available on the upstream MCP server and can auto-create a Leash policy for them. By default, auto-discovered tools are set to **deny** — you review and flip them to allow.
+When the proxy starts, it discovers the tools available on the upstream MCP server and can auto-create a Leash policy for them. Auto-discovered tools are set to **deny**, and the generated policy is scoped to the proxy's own agent. An admin reviews it and grants `allow` rules, because agents can't grant themselves permissions.
 
 Check what was discovered:
 
@@ -287,11 +292,13 @@ python -m sdk.mcp_proxy \
 
 ## Tool Poisoning Detection
 
-The proxy computes a SHA-256 hash of each tool's description when it first sees it. If a tool's description changes mid-session (a potential sign of prompt injection or tool poisoning), the proxy logs a warning:
+The proxy computes a SHA-256 hash of each tool's description when it first sees it. If a tool's description or input schema changes mid-session (a potential rug-pull or tool-poisoning attack), the proxy logs a warning, records it in the audit trail, and **blocks further calls to that tool** until the session restarts:
 
 ```
-[leash-mcp] WARNING Tool 'read_file' description changed mid-session (possible tool poisoning)
+[leash-mcp] WARNING TOOL POISONING DETECTED: 'read_file' description/schema changed mid-session (ASI04)
 ```
+
+Use `--on-tool-change warn` to log without blocking.
 
 This maps to OWASP ASI02 (Tool Misuse & Exploitation).
 
@@ -302,7 +309,10 @@ This maps to OWASP ASI02 (Tool Misuse & Exploitation).
 | `--leash-url` | `http://localhost:8000` | Leash server URL |
 | `--agent-name` | `mcp-proxy` | Agent name for registration |
 | `--on-deny` | `error` | What to return on deny: `error` or `empty` |
+| `--on-tool-change` | `block` | When a tool definition changes mid-session: `block` further calls or only `warn` |
 | `--no-auto-discover` | (off) | Don't auto-create a policy from discovered tools |
+
+The proxy caches its identity at `~/.leash/mcp_<agent-name>.json` (mode `0600`).
 
 ## Troubleshooting
 

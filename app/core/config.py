@@ -26,13 +26,20 @@ JWT_EXPIRATION_HOURS = int(os.getenv("JWT_EXPIRATION_HOURS", "168"))
 # Policy
 MAX_POLICY_PRIORITY = int(os.getenv("MAX_POLICY_PRIORITY", "100"))
 
-# Policy admin gate – when True, only admin/cli agents can manage policies
-# Single-user default: permissive.  Set LEASH_POLICY_REQUIRE_ADMIN=1 for fleet deployments.
-POLICY_REQUIRE_ADMIN = os.getenv("LEASH_POLICY_REQUIRE_ADMIN", "").lower() in ("1", "true", "yes")
+# Policy admin gate – when True (default), only admin-type tokens (cli/admin/ops)
+# can manage policies.  Non-admin agents may only create *self-restricting*
+# policies (deny-only, scoped to their own agent_id).  Disabling this lets any
+# agent grant itself arbitrary permissions — only do so in throwaway sandboxes.
+POLICY_REQUIRE_ADMIN = os.getenv("LEASH_POLICY_REQUIRE_ADMIN", "true").lower() not in ("0", "false", "no", "off")
 
 # Require auth for agent registration — set to 1/true for production.
-# When enabled, POST /agents requires a valid admin JWT.
+# When enabled, POST /agents requires an admin JWT or the admin key header.
 REQUIRE_AUTH_REGISTER = os.getenv("LEASH_REQUIRE_AUTH_REGISTER", "").lower() in ("1", "true", "yes")
+
+# Admin bootstrap key – required to register admin-type agents (cli/admin/ops).
+# If unset, a random key is generated at KEYS_DIR/admin.key (mode 0600) on
+# first use.  Send it as the ``X-Leash-Admin-Key`` header.
+ADMIN_KEY = os.getenv("LEASH_ADMIN_KEY", "")
 
 # Require auth for read-only endpoints (metrics, audit export, overview).
 # Strongly recommended for any network-exposed deployment.

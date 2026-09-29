@@ -9,6 +9,9 @@ Scopes:
 
 * ``user``    – this user, every project (default)
 * ``project`` – committed to a repository so teammates / cloud agents get it
+
+OpenClaw is different: it is gated by a plugin, not a hook config file, and
+is always per-user (see :mod:`leash.hooks.openclaw`).
 """
 
 from __future__ import annotations
@@ -43,7 +46,7 @@ class Target:
 @dataclass
 class Result:
     target: Target
-    action: str  # installed | updated | unchanged | removed | absent
+    action: str  # installed | updated | unchanged | partial | removed | absent
     backup: Optional[Path] = None
     notes: List[str] = field(default_factory=list)
     content: Optional[str] = None
@@ -64,6 +67,12 @@ def target_for(host: str, scope: str = "user", project_dir: Optional[Path] = Non
         raise ValueError(f"Unknown host '{host}'. Choose from: {', '.join(HOSTS)}")
     if scope not in SCOPES:
         raise ValueError(f"Unknown scope '{scope}'. Choose from: {', '.join(SCOPES)}")
+    if host == "openclaw":
+        if scope == "project":
+            raise ValueError("OpenClaw is protected per user; run `leash install openclaw` without --project")
+        from leash.hooks import openclaw
+
+        return Target(host, scope, openclaw.plugin_dir(), own_file=True)
     if scope == "project":
         root = Path(project_dir or Path.cwd()).resolve()
         rel = {
@@ -91,6 +100,9 @@ def detect_hosts() -> List[str]:
         "cursor": (Path.home() / ".cursor", "cursor"),
         "codex": (_home_dir("CODEX_HOME", ".codex"), "codex"),
     }
+    from leash.hooks import openclaw
+
+    probes["openclaw"] = (openclaw.state_dir(), "openclaw")
     for host, (config_dir, binary) in probes.items():
         if config_dir.exists() or shutil.which(binary):
             found.append(host)
@@ -111,11 +123,19 @@ def hook_command(host: str, scope: str = "user", override: Optional[str] = None)
         return override
     if scope == "project":
         return f"leash hook {host}"
+    return _quote(hook_argv(host))
+
+
+def hook_argv(host: str, override: Optional[str] = None) -> List[str]:
+    """The hook command as an argument list (for hosts that spawn it
+    directly, like the OpenClaw plugin)."""
+    if override:
+        return shlex.split(override, posix=not _is_windows())
     sibling = Path(sys.executable).parent / ("leash.exe" if _is_windows() else "leash")
     exe = str(sibling) if sibling.is_file() else shutil.which("leash")
     if exe:
-        return _quote([exe, "hook", host])
-    return _quote([sys.executable, "-m", "leash", "hook", host])
+        return [exe, "hook", host]
+    return [sys.executable, "-m", "leash", "hook", host]
 
 
 def _ours(command: Any, host: str) -> bool:
@@ -220,6 +240,10 @@ def _strip(doc: Dict[str, Any], host: str) -> bool:
 
 
 def is_installed(target: Target) -> bool:
+    if target.host == "openclaw":
+        from leash.hooks import openclaw
+
+        return openclaw.is_installed()
     doc = _read(target.path)
     if doc is None:
         return False
@@ -279,6 +303,8 @@ def install(
     dry_run: bool = False,
 ) -> Result:
     target = target_for(host, scope, project_dir)
+    if host == "openclaw":
+        return _install_openclaw(target, command, dry_run)
     cmd = hook_command(host, scope, command)
     existing = _read(target.path)
     doc = render(target, cmd, existing)
@@ -308,6 +334,8 @@ def uninstall(
     dry_run: bool = False,
 ) -> Result:
     target = target_for(host, scope, project_dir)
+    if host == "openclaw":
+        return _uninstall_openclaw(target, dry_run)
     existing = _read(target.path)
     if existing is None or not is_installed(target):
         return Result(target, "absent")
@@ -322,12 +350,74 @@ def uninstall(
     return Result(target, "removed", backup)
 
 
+def _install_openclaw(target: Target, command: Optional[str], dry_run: bool) -> Result:
+    from leash.hooks import openclaw
+
+    argv = hook_argv("openclaw", command)
+    fresh = not target.path.exists()
+    files_ok = openclaw.files_current(argv)
+    linked = openclaw.is_linked()
+    link = openclaw.link_commands()
+    manual = [f"Link it into OpenClaw: {openclaw.shell_line(c)}" for c in link]
+    if files_ok and linked:
+        return Result(target, "unchanged")
+    action = "installed" if fresh else "updated"
+    if dry_run:
+        content = f"write plugin files: {', '.join(openclaw.rendered_files(argv))}\n"
+        if not linked:
+            content += "".join(f"run: {openclaw.shell_line(c)}\n" for c in link)
+        return Result(target, action, content=content)
+    if not files_ok:
+        openclaw.write_files(argv)
+    notes: List[str] = []
+    if not linked:
+        if openclaw.cli_available():
+            ok, err = openclaw.run_cli(link)
+            if not ok:
+                notes.append(f"`openclaw plugins install` failed: {err}")
+                notes += manual
+                return Result(target, "partial", notes=notes)
+        else:
+            notes.append("The `openclaw` command isn't on PATH, so the plugin isn't linked yet.")
+            notes += manual
+            return Result(target, "partial", notes=notes)
+    notes.append("Restart OpenClaw (or run `openclaw plugins reload leash`) so the plugin loads.")
+    notes.append("When Leash asks for approval, OpenClaw pauses the tool call; approve it with /approve or the approval button.")
+    return Result(target, action, notes=notes)
+
+
+def _uninstall_openclaw(target: Target, dry_run: bool) -> Result:
+    from leash.hooks import openclaw
+
+    linked = openclaw.is_linked()
+    if not linked and not target.path.exists():
+        return Result(target, "absent")
+    if dry_run:
+        return Result(target, "removed")
+    notes: List[str] = []
+    if linked:
+        ok, err = openclaw.run_cli(openclaw.unlink_commands())
+        if not ok:
+            notes.append(f"Couldn't unlink the plugin automatically ({err}). Run: "
+                         + "; ".join(openclaw.shell_line(c) for c in openclaw.unlink_commands()))
+            # Keep the files: OpenClaw still loads them and would fail closed.
+            return Result(target, "partial", notes=notes)
+    openclaw.remove_files()
+    return Result(target, "removed", notes=notes)
+
+
 def status(project_dir: Optional[Path] = None) -> List[Dict[str, Any]]:
     """Where Leash is (and isn't) installed."""
     rows = []
     detected = set(detect_hosts())
     for host in HOSTS:
         for scope in SCOPES:
+            if host == "openclaw" and scope == "project":
+                rows.append({
+                    "host": host, "scope": scope, "path": "", "installed": False,
+                    "detected": host in detected, "error": "", "supported": False,
+                })
+                continue
             target = target_for(host, scope, project_dir)
             try:
                 installed = is_installed(target)

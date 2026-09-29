@@ -13,6 +13,9 @@ References (checked Sept 2026):
   ``beforeMCPExecution`` / ``beforeReadFile`` → ``permission``
 * Codex        – ``PreToolUse`` → ``hookSpecificOutput.permissionDecision``
   (``ask`` is not supported, so it is rendered as deny)
+* OpenClaw     – plugin ``before_tool_call`` (via the bundled Leash plugin,
+  which pipes ``{tool_name, tool_input, cwd}`` in and maps
+  ``{decision, reason}`` to ``block`` / ``requireApproval``)
 """
 
 from __future__ import annotations
@@ -22,7 +25,7 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 
 from leash.hooks.actions import ToolCall
 
-HOSTS = ("claude-code", "copilot", "cursor", "codex")
+HOSTS = ("claude-code", "copilot", "cursor", "codex", "openclaw")
 
 #: Returned by ``parse`` for tool calls another hook event covers.
 DEFER = "defer"
@@ -40,7 +43,10 @@ class Verdict:
         where = f" [{self.policy}/{self.rule}]" if self.policy else ""
         prefix = "Leash requires approval" if self.decision == "ask" else "Blocked by Leash"
         what = f" — {self.request[:200]}" if self.request else ""
-        return f"{prefix}: {self.reason}{where}{what}"
+        return f"{prefix}: {self.reason}{where}{what}. {EXPLAIN_HINT}"
+
+
+EXPLAIN_HINT = "(The user can run `leash explain` in a terminal for details and options.)"
 
 
 Rendered = Tuple[Optional[Dict[str, Any]], int]
@@ -48,6 +54,8 @@ Rendered = Tuple[Optional[Dict[str, Any]], int]
 
 def detect_host(payload: Mapping[str, Any]) -> str:
     """Guess the host from its payload (for plugins shared across hosts)."""
+    if payload.get("hook_event_name") == "before_tool_call":
+        return "openclaw"
     if "cursor_version" in payload or "conversation_id" in payload:
         return "cursor"
     if "toolName" in payload or "toolArgs" in payload:
@@ -184,6 +192,32 @@ def _render_cursor(verdict: Verdict, payload: Mapping[str, Any]) -> Rendered:
     return {"permission": decision, "user_message": msg, "agent_message": msg}, 0
 
 
+# ── OpenClaw (via the Leash plugin's before_tool_call handler) ────────────
+
+def _parse_openclaw(payload: Mapping[str, Any]):
+    event = payload.get("hook_event_name")
+    if event and event != "before_tool_call":
+        return None
+    tool = str(payload.get("tool_name") or "")
+    # Code Mode's outer `exec` runs JavaScript, not a shell command.
+    if payload.get("tool_kind") == "code_mode_exec":
+        tool = "code_mode_exec"
+    return ToolCall(
+        host="openclaw",
+        tool=tool,
+        args=payload.get("tool_input") or {},
+        cwd=str(payload.get("cwd") or ""),
+        session=str(payload.get("session_id") or ""),
+    )
+
+
+def _render_openclaw(verdict: Verdict, payload: Mapping[str, Any]) -> Rendered:
+    out: Dict[str, Any] = {"decision": verdict.decision}
+    if verdict.decision != "allow":
+        out["reason"] = verdict.message()
+    return out, 0
+
+
 # ── registry ───────────────────────────────────────────────────────────────
 
 def parse(host: str, payload: Mapping[str, Any]):
@@ -195,6 +229,8 @@ def parse(host: str, payload: Mapping[str, Any]):
         return _parse_copilot(payload)
     if host == "cursor":
         return _parse_cursor(payload)
+    if host == "openclaw":
+        return _parse_openclaw(payload)
     raise ValueError(f"Unknown host '{host}'. Choose from: {', '.join(HOSTS)}")
 
 
@@ -204,9 +240,14 @@ def render(host: str, verdict: Verdict, payload: Mapping[str, Any]) -> Rendered:
         "codex": _render_codex,
         "copilot": _render_copilot,
         "cursor": _render_cursor,
+        "openclaw": _render_openclaw,
     }[host](verdict, payload)
 
 
 def passthrough(host: str, payload: Mapping[str, Any]) -> Rendered:
     """Output for events Leash doesn't evaluate (no opinion)."""
-    return ({"permission": "allow"}, 0) if host == "cursor" else (None, 0)
+    if host == "cursor":
+        return {"permission": "allow"}, 0
+    if host == "openclaw":
+        return {"decision": "allow"}, 0
+    return None, 0

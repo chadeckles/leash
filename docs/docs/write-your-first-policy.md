@@ -2,6 +2,9 @@
 
 Policies are YAML files that tell Leash what an agent is allowed to do. This guide walks you through writing one from scratch — **starting with a scan of what the agent actually does.**
 
+!!! tip "Just want to allow one thing?"
+    If you use Leash with a coding agent or OpenClaw and it flagged something you trust, you don't need to write YAML: run `leash explain` to see why, then `leash allow` to add an exception (`leash allow --undo` reverts it). See [Allowing something Leash flagged](hooks.md#allowing-something-leash-flagged).
+
 ## The Scan-First Workflow
 
 !!! tip "Don't guess — scan first"

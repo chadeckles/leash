@@ -3,9 +3,11 @@
 Quick start for coding agents (no server)::
 
     leash install                     # hook every detected agent
-    leash install claude-code copilot # or name them
+    leash install claude-code openclaw # or name them
     leash hosts                       # what's hooked where
     leash audit tail -f               # watch decisions
+    leash explain                     # why was that blocked?
+    leash allow                       # ...and allow it from now on
     leash policy test --local -a shell.exec -r "git push --force"
     leash init --preset coding-agent  # (re)install a bundled preset
     leash uninstall                   # remove the hooks
@@ -1064,6 +1066,12 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     for r in hook_rows:
         if r["error"]:
             _check(f"hook_{r['host']}", "warn", f"Could not read {r['path']}: {r['error']}", "medium")
+    from leash.hooks import openclaw as openclaw_hook
+
+    if (openclaw_hook.plugin_dir() / "index.js").is_file() and not openclaw_hook.is_linked():
+        _check("hook_openclaw", "warn",
+               "The Leash plugin for OpenClaw isn't linked into OpenClaw yet — run: "
+               + openclaw_hook.shell_line(openclaw_hook.link_commands()[0]), "medium")
     if hooked:
         _check("hooks", "pass", "Hooks installed: " + ", ".join(f"{r['host']} ({r['scope']})" for r in hooked))
     else:
@@ -1097,9 +1105,17 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     if hooked:
         from leash.engine import PolicyDirectory
         policies = PolicyDirectory(paths.policies_dir()).policies
+        from leash.engine import evaluate_policies
+
         for host in sorted({r["host"] for r in hooked}):
             covering = [p.name for p in policies if p.name != "default" and p.applies_to(host, host)]
-            if covering:
+            routine = evaluate_policies(policies, host, "shell.exec", "ls", {"host": host},
+                                        agent_name=host, normalize=False)
+            if covering and routine.decision != "allow":
+                _check(f"policy_{host}", "fail",
+                       f"{host} is governed by {', '.join(covering)}, but even `ls` is {routine.decision} "
+                       f"({routine.reason}). Run 'leash init --preset coding-agent --force'", "high")
+            elif covering:
                 _check(f"policy_{host}", "pass", f"{host} is governed by: {', '.join(covering)}")
             else:
                 _check(f"policy_{host}", "fail",
@@ -1422,7 +1438,7 @@ def main() -> None:
     hook_p = sub.add_parser("hook", help="Evaluate one agent tool call from stdin (called by the agent's hook)")
     hook_p.add_argument("host", nargs="?", default="auto", choices=("auto",) + HOST_CHOICES)
 
-    inst_p = sub.add_parser("install", help="Hook Leash into coding agents (Claude Code, Copilot CLI, Cursor, Codex)")
+    inst_p = sub.add_parser("install", help="Hook Leash into your agents (Claude Code, Copilot CLI, Cursor, Codex, OpenClaw)")
     inst_p.add_argument("hosts", nargs="*", choices=HOST_CHOICES, metavar="AGENT",
                         help=f"Agents to hook ({', '.join(HOST_CHOICES)}); default: every detected agent")
     inst_p.add_argument("--project", nargs="?", const="", metavar="DIR",
@@ -1438,6 +1454,18 @@ def main() -> None:
     hosts_p = sub.add_parser("hosts", help="Show which coding agents are detected and hooked")
     hosts_p.add_argument("--project", metavar="DIR", help="Project directory to inspect (default: cwd)")
     hosts_p.add_argument("--json", dest="json_out", action="store_true", help="Output JSON")
+
+    explain_p = sub.add_parser("explain", help="Explain the most recent blocked or approval-required tool call")
+    explain_p.add_argument("which", nargs="?", default="last",
+                           help="'last' (default) or N for the Nth most recent")
+
+    allow_p = sub.add_parser("allow", help="Allow a tool call Leash blocked or asked about (adds a rule to my_rules.yaml)")
+    allow_p.add_argument("which", nargs="?", default="last", help="'last' (default) or N, as shown by `leash explain`")
+    allow_p.add_argument("--pattern", help="Allow a glob pattern instead of exactly this resource (e.g. '/Users/me/Desktop/*')")
+    allow_p.add_argument("--all-agents", action="store_true", help="Apply to every agent, not just the one that was blocked")
+    allow_p.add_argument("--undo", action="store_true", help="Remove the most recent rule added with `leash allow`")
+    allow_p.add_argument("--dry-run", action="store_true", help="Show the rule without saving it")
+    allow_p.add_argument("--yes", "-y", action="store_true", help="Don't ask for confirmation")
 
     # ── agents ──
     agents_parser = sub.add_parser("agents", help="Manage agents")
@@ -1528,6 +1556,7 @@ def main() -> None:
     atail.add_argument("-n", "--lines", type=int, default=20, help="Number of entries (default: 20)")
     atail.add_argument("-f", "--follow", action="store_true", help="Keep printing new entries")
     atail.add_argument("--json", dest="json_out", action="store_true", help="Output raw JSON lines")
+    atail.add_argument("-w", "--wide", action="store_true", help="Don't shorten long commands and paths")
     audit_sub.add_parser("verify", help="Verify the local audit hash chain")
 
     # ── status ──
@@ -1579,6 +1608,10 @@ def main() -> None:
         cli_local.cmd_uninstall(args)
     elif args.command == "hosts":
         cli_local.cmd_hosts(args)
+    elif args.command == "explain":
+        cli_local.cmd_explain(args)
+    elif args.command == "allow":
+        cli_local.cmd_allow(args)
     elif args.command == "init":
         if args.preset or args.list_presets:
             cli_local.cmd_init_preset(args)

@@ -1,0 +1,8 @@
+{
+  "name": "leash-openclaw",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Leash guardrails for OpenClaw (installed by `leash install openclaw`)",
+  "openclaw": { "extensions": ["./index.js"] }
+}

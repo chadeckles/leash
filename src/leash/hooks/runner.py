@@ -149,19 +149,22 @@ def _audit(host: str, call: ToolCall, verdict: Verdict, observations, observe: b
     decision = verdict.decision
     if observe and decision != "allow":
         decision = f"observe_{decision}"
+    summary = _summary(call)
     record = {
         "host": host,
         "agent": agent_name_for(host),
         "session": call.session,
         "cwd": call.cwd,
         "tool": call.tool,
-        "request": verdict.request[:2000] if verdict.request else _summary(call),
+        "request": verdict.request[:2000] if verdict.request else summary,
         "decision": decision,
         "reason": verdict.reason,
         "policy": verdict.policy,
         "rule": verdict.rule,
         "ms": round((time.perf_counter() - started) * 1000, 1),
     }
+    if verdict.request and summary != verdict.request[:2000]:
+        record["call"] = summary
     if observations:
         record["observations"] = observations
     try:

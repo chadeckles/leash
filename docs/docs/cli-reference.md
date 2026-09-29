@@ -52,12 +52,14 @@ leash install --dry-run                # print what would be written
 
 | Flag | Description |
 |------|-------------|
-| `AGENT ...` | `claude-code`, `copilot`, `cursor`, `codex` (default: every agent detected on this machine) |
+| `AGENT ...` | `claude-code`, `copilot`, `cursor`, `codex`, `openclaw` (default: every agent detected on this machine) |
 | `--project [DIR]` | Write repo-level config in `DIR` (default: current directory) |
 | `--dry-run` | Show the resulting config without writing it |
 | `--command CMD` | Override the hook command (advanced) |
 
 Creates `~/.leash/policies/` with the bundled presets on first run, or adds the `coding-agent` preset if it's missing. Existing config is merged and backed up to `~/.leash/backups/`. Re-running is a no-op.
+
+`openclaw` installs a plugin into `~/.leash/integrations/openclaw` and links it with the `openclaw` CLI (user scope only; see the [OpenClaw guide](openclaw-guide.md)). It also replaces the pre-0.4 server-era `openclaw.yaml` preset, backing up the old file.
 
 ### uninstall
 
@@ -66,7 +68,37 @@ leash uninstall                        # all agents, user scope
 leash uninstall cursor --project
 ```
 
-Removes only Leash's hook entries (and deletes `leash.json` for Copilot).
+Removes only Leash's hook entries (and deletes `leash.json` for Copilot, or unlinks and deletes the OpenClaw plugin). Your policies and audit log in `~/.leash` are kept; the output explains how to remove everything.
+
+### explain
+
+```bash
+leash explain          # most recent deny / ask / observe decision
+leash explain 2        # the second most recent
+```
+
+Explains a flagged decision from the local audit log in plain English: what the agent tried, which rule matched (and the policy file it's in), what the agent did with the verdict, and the `leash allow` commands you could run.
+
+### allow
+
+```bash
+leash allow                               # allow exactly the most recent flagged call, for that agent
+leash allow 2 --pattern '~/notes/*'       # allow a glob instead, based on the 2nd most recent
+leash allow --all-agents                  # don't limit the rule to the agent that was flagged
+leash allow --dry-run                     # print the rule only
+leash allow --undo                        # remove the last rule added
+```
+
+| Flag | Description |
+|------|-------------|
+| `WHICH` | Which flagged decision (1 = most recent) |
+| `--pattern GLOB` | Allow resources matching this glob instead of the exact one |
+| `--all-agents` | Apply to every agent (default: only the agent that was flagged) |
+| `--undo` | Remove the most recently added rule |
+| `--dry-run` | Show the rule without saving |
+| `-y`, `--yes` | Don't ask for confirmation (otherwise an interactive terminal is required) |
+
+Rules are written to `~/.leash/policies/my_rules.yaml` (`priority: 100`). After saving, the call is re-evaluated to confirm it's now allowed. On case-insensitive filesystems (macOS), a lower-case copy of file and shell rules is added too.
 
 ### hosts
 
@@ -453,6 +485,7 @@ The local audit log written by coding-agent hooks (`~/.leash/audit/audit.jsonl`)
 leash audit tail              # last 20 decisions
 leash audit tail -n 100 -f    # follow
 leash audit tail --json       # raw JSON lines
+leash audit tail -w           # don't shorten long commands and paths
 leash audit verify            # check the hash chain (exit 1 if broken)
 ```
 

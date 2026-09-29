@@ -27,8 +27,11 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setenv("LEASH_HOME", str(tmp_path / ".leash"))
     monkeypatch.setenv("POLICIES_DIR", str(tmp_path / ".leash" / "policies"))
     for var in ("CLAUDE_CONFIG_DIR", "COPILOT_HOME", "CODEX_HOME", "CLAUDE_PROJECT_DIR",
-                "LEASH_MODE", "LEASH_AGENT", "LEASH_FAIL_OPEN", "LEASH_AUDIT_LOG"):
+                "LEASH_MODE", "LEASH_AGENT", "LEASH_FAIL_OPEN", "LEASH_AUDIT_LOG",
+                "OPENCLAW_STATE_DIR", "OPENCLAW_CONFIG_PATH", "OPENCLAW_PROFILE", "OPENCLAW_WORKSPACE_DIR"):
         monkeypatch.delenv(var, raising=False)
+    # Never drive a real OpenClaw install from the tests.
+    monkeypatch.setattr("leash.hooks.openclaw.cli_available", lambda: None)
     paths.seed_policies(paths.policies_dir(), presets=["default", "coding_agent"])
     (tmp_path / "proj").mkdir()
     return tmp_path
@@ -277,8 +280,11 @@ def test_install_preserves_existing_config_and_is_idempotent(home):
     assert inst.uninstall("claude-code").action == "absent"
 
 
+HOOK_FILE_HOSTS = [h for h in inst.HOSTS if h != "openclaw"]
+
+
 def test_install_each_host_and_project_scope(home):
-    for host in inst.HOSTS:
+    for host in HOOK_FILE_HOSTS:
         assert inst.install(host).action == "installed"
     copilot = json.loads((home / ".copilot" / "hooks" / "leash.json").read_text())
     assert copilot["version"] == 1 and "hook copilot" in copilot["hooks"]["preToolUse"][0]["bash"]
@@ -294,7 +300,7 @@ def test_install_each_host_and_project_scope(home):
     dry = inst.install("codex", "project", project_dir=proj, dry_run=True)
     assert dry.content and not dry.target.path.exists()
 
-    for host in inst.HOSTS:
+    for host in HOOK_FILE_HOSTS:
         assert inst.uninstall(host).action == "removed"
     assert not (home / ".copilot" / "hooks" / "leash.json").exists()
     assert not any(r["installed"] for r in inst.status(proj) if r["scope"] == "user")
@@ -438,3 +444,209 @@ def test_install_keeps_symlinked_settings(home, tmp_path):
     assert link.is_symlink() and "hook claude-code" in real.read_text()
     inst.uninstall("claude-code")
     assert link.is_symlink() and json.loads(real.read_text()) == {"theme": "dark"}
+
+
+# ── OpenClaw plugin ────────────────────────────────────────────────────────
+
+FAKE_OPENCLAW = """#!{python}
+import json, os, sys
+home = os.environ["HOME"]
+cfg = os.path.join(home, ".openclaw", "openclaw.json")
+os.makedirs(os.path.dirname(cfg), exist_ok=True)
+with open(os.path.join(home, "openclaw-calls.log"), "a") as fh:
+    fh.write(" ".join(sys.argv[1:]) + "\\n")
+args = sys.argv[1:]
+if args[:3] == ["plugins", "install", "--link"]:
+    open(cfg, "w").write(json.dumps({{"plugins": {{"load": {{"paths": [args[3]]}}}}}}))
+elif args[:2] == ["plugins", "uninstall"]:
+    open(cfg, "w").write("{{}}")
+"""
+
+
+@pytest.fixture
+def fake_openclaw(home, monkeypatch):
+    import sys
+
+    exe = home / "bin" / "openclaw"
+    exe.parent.mkdir()
+    exe.write_text(FAKE_OPENCLAW.format(python=sys.executable))
+    exe.chmod(0o755)
+    monkeypatch.setattr("leash.hooks.openclaw.cli_available", lambda: str(exe))
+    return home / "openclaw-calls.log"
+
+
+def openclaw_payload(home, tool, params, **extra):
+    return {"hook_event_name": "before_tool_call", "tool_name": tool, "tool_input": params,
+            "cwd": str(home / "proj"), "session_id": "oc1", **extra}
+
+
+def test_openclaw_install_links_plugin_and_uninstalls(home, fake_openclaw):
+    from leash.hooks import openclaw
+
+    r = inst.install("openclaw")
+    assert r.action == "installed", r.notes
+    plugin = openclaw.plugin_dir()
+    assert r.target.path == plugin
+    assert {"index.js", "openclaw.plugin.json", "package.json", "leash.json"} <= {p.name for p in plugin.iterdir()}
+    assert json.loads((plugin / "leash.json").read_text())["command"][-2:] == ["hook", "openclaw"]
+    assert "plugins install --link" in fake_openclaw.read_text()
+    assert openclaw.is_installed()
+    row = next(r for r in inst.status() if r["host"] == "openclaw" and r["scope"] == "user")
+    assert row["installed"] and row["detected"]
+    assert inst.install("openclaw").action == "unchanged"
+
+    assert inst.uninstall("openclaw").action == "removed"
+    assert "plugins uninstall leash" in fake_openclaw.read_text()
+    assert not plugin.exists()
+    assert inst.uninstall("openclaw").action == "absent"
+
+
+def test_openclaw_without_cli_is_partial_and_explains(home):
+    from leash.hooks import openclaw
+
+    r = inst.install("openclaw")
+    assert r.action == "partial"
+    assert any("openclaw plugins install --link" in n for n in r.notes)
+    assert (openclaw.plugin_dir() / "index.js").is_file() and not openclaw.is_installed()
+    with pytest.raises(ValueError, match="per user"):
+        inst.install("openclaw", "project", project_dir=home / "proj")
+    # Files-only (never linked) installs can be removed without the CLI.
+    assert inst.uninstall("openclaw").action == "removed"
+
+
+def test_openclaw_hook_decisions(home):
+    paths.install_preset("openclaw", paths.policies_dir())
+    (home / "proj" / ".env").write_text("OPENAI_API_KEY=sk-test")
+
+    def decide(tool, params, **extra):
+        code, out, err = hook("openclaw", openclaw_payload(home, tool, params, **extra))
+        assert code == 0, err
+        return out["decision"], out.get("reason", "")
+
+    assert decide("exec", {"command": "ls -la"})[0] == "allow"
+    d, reason = decide("exec", {"command": "rm -rf ~"})
+    assert d == "deny" and "home directory" in reason and "leash explain" in reason
+    assert decide("read", {"path": ".env"})[0] == "ask"
+    assert decide("write", {"path": str(home / ".openclaw" / "openclaw.json"), "content": "{}"})[0] == "deny"
+    assert decide("read", {"path": str(home / ".openclaw" / "credentials" / "whatsapp.json")})[0] == "deny"
+    assert decide("cron", {"action": "add"})[0] == "ask"
+    assert decide("nodes", {"action": "camera_snap"})[0] == "ask"
+    assert decide("message", {"action": "send", "text": "hi"})[0] == "allow"
+    assert decide("web_fetch", {"url": "https://example.com"})[0] == "allow"
+    # Code Mode's outer exec runs JavaScript, not a shell command.
+    assert decide("exec", {"code": "rm -rf ~"}, tool_kind="code_mode_exec")[0] == "allow"
+    assert detect_host(openclaw_payload(home, "exec", {})) == "openclaw"
+
+
+def test_openclaw_old_server_preset_is_replaced(home):
+    from leash import cli_local
+
+    old = paths.policies_dir() / "openclaw.yaml"
+    old.write_text("name: openclaw-policy\npriority: 20\nagents: ['*openclaw*']\nrules:\n"
+                   "  - action: '*'\n    effect: deny\n")
+    notes = cli_local._ensure_policies(["openclaw"])
+    assert any("Replaced" in n for n in notes)
+    assert "name: openclaw\n" in old.read_text()
+    assert list((paths.leash_home() / "backups").glob("openclaw-policy-*.yaml"))
+    assert cli_local._ensure_policies(["openclaw"]) == []
+
+
+@pytest.mark.skipif(not __import__("shutil").which("node"), reason="node not installed")
+def test_openclaw_plugin_js_maps_verdicts(home, tmp_path):
+    import subprocess
+    import sys
+
+    from leash.hooks import openclaw
+
+    paths.install_preset("openclaw", paths.policies_dir())
+    plugin = openclaw.write_files([sys.executable, "-m", "leash", "hook", "openclaw"])
+    script = tmp_path / "drive.mjs"
+    script.write_text(f"""
+import plugin, {{ checkWithLeash }} from {json.dumps((plugin / "index.js").as_uri())};
+let handler;
+plugin.register({{ on: (name, fn) => {{ if (name === "before_tool_call") handler = fn; }} }});
+const out = {{}};
+out.ls = await handler({{ toolName: "exec", params: {{ command: "ls" }} }}, {{}});
+out.rm = await handler({{ toolName: "exec", params: {{ command: "rm -rf ~" }} }}, {{}});
+out.cron = await handler({{ toolName: "cron", params: {{}} }}, {{}});
+out.missing = await checkWithLeash(["/nonexistent/leash"], {{}});
+console.log(JSON.stringify(out));
+""")
+    env = {**os.environ, "OPENCLAW_WORKSPACE_DIR": str(home / "proj")}
+    proc = subprocess.run(["node", str(script)], capture_output=True, text=True, env=env, timeout=60)
+    assert proc.returncode == 0, proc.stderr
+    out = json.loads(proc.stdout)
+    assert "ls" not in out  # allow → undefined → no opinion
+    assert out["rm"]["block"] is True and "home directory" in out["rm"]["blockReason"]
+    assert out["cron"]["requireApproval"]["allowedDecisions"] == ["allow-once", "deny"]
+    assert out["missing"]["decision"] == "deny" and "fail-closed" in out["missing"]["reason"]
+
+
+# ── explain / allow ────────────────────────────────────────────────────────
+
+def _ns(**kw):
+    import argparse
+
+    base = dict(which="last", pattern=None, all_agents=False, undo=False, dry_run=False, yes=True)
+    return argparse.Namespace(**{**base, **kw})
+
+
+def test_explain_and_allow_last_then_undo(home, capsys):
+    from leash import cli_local
+
+    env_file = home / "proj" / ".env"
+    env_file.write_text("KEY=1")
+    payload = claude(home, "Read", {"file_path": str(env_file)})
+    assert hook("claude-code", payload)[1]["hookSpecificOutput"]["permissionDecision"] == "ask"
+    hook("claude-code", claude(home, "Bash", {"command": "cd proj && git push --force"}))
+
+    cli_local.cmd_explain(_ns())
+    out = capsys.readouterr().out
+    assert "Leash asked for your approval" in out and "Claude Code" in out
+    assert "The agent tried to run the command cd proj && git push --force" in out
+    assert "Leash flagged:     git push --force" in out
+    assert "coding_agent.yaml" in out and "leash allow" in out and "--pattern 'git push*'" in out
+
+    cli_local.cmd_explain(_ns(which="2"))
+    assert ".env" in capsys.readouterr().out
+
+    cli_local.cmd_allow(_ns(which="2"))
+    out = capsys.readouterr().out
+    assert "✔ Saved" in out
+    rules = (paths.policies_dir() / "my_rules.yaml").read_text()
+    assert "host: claude-code" in rules
+    assert hook("claude-code", payload)[1] is None  # now allowed
+    # Only for Claude Code: another agent is still asked.
+    code, out_json, _ = hook("codex", {**payload, "turn_id": "t"})
+    assert out_json["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+    cli_local.cmd_allow(_ns(undo=True))
+    assert "Removed" in capsys.readouterr().out
+    assert hook("claude-code", payload)[1]["hookSpecificOutput"]["permissionDecision"] == "ask"
+
+
+def test_allow_pattern_requires_tty_and_agents_cannot_self_allow(home, capsys, monkeypatch):
+    from leash import cli_local
+
+    hook("claude-code", claude(home, "Bash", {"command": "git push --force"}))
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    with pytest.raises(SystemExit):
+        cli_local.cmd_allow(_ns(yes=False))
+    cli_local.cmd_allow(_ns(pattern="git push*"))
+    assert hook("claude-code", claude(home, "Bash", {"command": "git push -f origin main"}))[1] is None
+
+    for cmd in ("leash allow --yes", "python -m leash allow last -y", "/opt/bin/leash uninstall"):
+        out = hook("claude-code", claude(home, "Bash", {"command": cmd}))[1]
+        assert out["hookSpecificOutput"]["permissionDecision"] == "deny", cmd
+
+
+def test_explain_with_nothing_flagged(home, capsys):
+    from leash import cli_local
+
+    with pytest.raises(SystemExit):
+        cli_local.cmd_explain(_ns())
+    assert "hasn't checked any tool calls" in capsys.readouterr().out
+    hook("claude-code", claude(home, "Bash", {"command": "ls"}))
+    with pytest.raises(SystemExit):
+        cli_local.cmd_explain(_ns())
+    assert "hasn't blocked" in capsys.readouterr().out

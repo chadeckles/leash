@@ -8,6 +8,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 > Work toward the next PyPI release (0.7) lands on the `next` branch. Nothing below is published yet. Phase status is tracked in [docs/docs/roadmap.md](docs/docs/roadmap.md).
 
+### Beginner path & OpenClaw (Phase 2.5)
+- **`leash install openclaw`** installs a small, dependency-free OpenClaw plugin (`~/.leash/integrations/openclaw`) and links it with `openclaw plugins install --link`. Leash never edits `openclaw.json` directly.
+  - The plugin sends every `before_tool_call` to `leash hook openclaw`. Deny → blocked with the reason; ask → OpenClaw's approval prompt (`/approve`, allow once or deny); allow → OpenClaw's own settings apply.
+  - Fail-closed if `leash` is missing, errors, or takes longer than 10 s.
+  - Without the `openclaw` CLI on PATH, install is reported as partial and prints the manual link command; `leash doctor` warns until it's linked. `leash uninstall openclaw` unlinks and removes it.
+- **`leash explain [N]`** explains the Nth most recent deny/ask in plain English: what the agent tried, the matching rule and file, what the agent did with it, and what you can do.
+- **`leash allow [N]`** adds an exception to `~/.leash/policies/my_rules.yaml` (priority 100), limited to the agent that was flagged unless `--all-agents`. `--pattern` allows a glob, `--dry-run` previews, `--undo` removes the last rule. It needs an interactive terminal unless `--yes`, and the coding-agent preset denies agents from running it.
+- Block messages now end with a hint to run `leash explain`. `leash install` prints numbered next steps; `leash uninstall` says what's left in `~/.leash` and how to remove it all.
+- `leash audit tail -w/--wide` shows long commands and paths in full; truncation is marked with `…`. Audit entries include the full tool call (`call`) when the flagged request is a sub-command.
+- `leash doctor` fails if a covering policy denies routine work (`ls`) for a hooked agent, and warns about an unlinked OpenClaw plugin.
+- New docs: [Start Here](docs/docs/start-here.md), a first-15-minutes tutorial with a glossary; the OpenClaw guide is rewritten around the plugin.
+- **Behaviour change: `openclaw` preset rewritten.** It now uses the hook vocabulary (`shell.exec`, `file.*`, `tool.<name>`), applies to `openclaw*` agents, and has no catch-all deny; unmatched calls fall through to `coding-agent`. It denies edits to OpenClaw's config and plugins and reads of its channel credentials, and asks before `tool.gateway`, `tool.nodes`, `tool.cron` and plugin/config commands. `leash install openclaw` backs up the old preset to `~/.leash/backups/`. Server/SDK agents named `openclaw-agent` that relied on the old deny-by-default rules should add their own rules.
+- `coding-agent` preset: applies to `openclaw*`, denies `*leash allow*`, and matches `leash uninstall` anywhere in a command.
+
 ### Coding-agent hooks (Phase 2)
 - **`leash install`**: one command hooks Leash into **Claude Code, GitHub Copilot CLI, Cursor and Codex**, with no server, registration or token.
   - It detects installed agents and merges into their existing hook config, backing it up to `~/.leash/backups/` first.

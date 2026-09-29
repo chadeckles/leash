@@ -11,6 +11,7 @@ and all of them ship to PyPI together as **v0.7**.
 | 0 | Security hardening | ✅ Done ([#1](https://github.com/chadeckles/leash/pull/1), merged to `main`) |
 | 1 | Packaging & pure engine | ✅ Done ([#2](https://github.com/chadeckles/leash/pull/2), into `next`) |
 | 2 | Hooks-first: `leash hook` / `leash install <host>` | ✅ Done (PR into `next`) |
+| 2.5 | Beginner path: OpenClaw plugin, `leash explain` / `allow`, Start Here | ✅ Done (PR into `next`) |
 | 3 | Local MCP proxy (no server needed) | ⏳ Planned |
 | 4 | v0.7 release: docs, polish, PyPI | ⏳ Planned |
 
@@ -44,6 +45,14 @@ and all of them ship to PyPI together as **v0.7**.
 - A `coding-agent` preset, `leash policy test --local`, `leash hosts`, and hook checks in `leash doctor`.
 
 *Deviations from the original plan:* Managed/MDM installs and plugin marketplaces were dropped to keep Leash small (see [Out of scope](#out-of-scope)).
+
+## Phase 2.5 — Beginner path ✅
+An end-to-end test as a first-time user (a student trying Claude Code and
+OpenClaw) showed the gaps between "installed" and "confident":
+- `leash install openclaw` adds a fail-closed OpenClaw plugin (`before_tool_call`); `ask` becomes OpenClaw's `/approve`. The OpenClaw preset now uses the hook vocabulary.
+- `leash explain` says in plain English why something was flagged and what you can do; `leash allow` adds an exception to `my_rules.yaml` (with `--pattern`, `--undo`). Agents can't run it.
+- Every block message points to `leash explain`; install/uninstall print next steps and what's left behind.
+- [Start Here](start-here.md): a first-15-minutes tutorial with a glossary.
 
 ## Phase 3 — Local MCP proxy
 Claude Code, Copilot CLI, Cursor and Codex already route MCP tool calls through

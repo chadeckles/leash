@@ -1,8 +1,8 @@
 # Coding Agents (Hooks)
 
-Leash can guard **Claude Code**, **GitHub Copilot CLI**, **Cursor** and
-**OpenAI Codex** without a server. Each of these agents runs a hook before it
-uses a tool. `leash install` registers Leash as that hook, so every shell
+Leash can guard **Claude Code**, **GitHub Copilot CLI**, **Cursor**,
+**OpenAI Codex** and **[OpenClaw](openclaw-guide.md)** without a server. Each
+of these agents runs a hook before it uses a tool. `leash install` registers Leash as that hook, so every shell
 command, file edit, web fetch and MCP call is checked against your YAML
 policy first.
 
@@ -17,7 +17,12 @@ That's the whole setup. Useful follow-ups:
 leash hosts                # which agents are detected and hooked
 leash audit tail -f        # watch decisions as they happen
 leash doctor               # check hooks, policies and the audit log
+leash explain              # why was the last call blocked / held for approval?
+leash allow                # allow it from now on (leash allow --undo reverts)
 ```
+
+!!! tip "New to agents?"
+    [Start Here](start-here.md) is a guided, plain-English walkthrough.
 
 ## How it works
 
@@ -44,6 +49,7 @@ sequenceDiagram
 | Copilot CLI | `~/.copilot/hooks/leash.json` | `.github/hooks/leash.json` |
 | Cursor | `~/.cursor/hooks.json` (`preToolUse`, `beforeShellExecution`, `beforeMCPExecution`) | `.cursor/hooks.json` |
 | Codex | `~/.codex/hooks.json` | `.codex/hooks.json` |
+| OpenClaw | plugin in `~/.leash/integrations/openclaw`, linked with `openclaw plugins install --link` ([guide](openclaw-guide.md)) | not supported (OpenClaw config is per user) |
 
 - Existing settings and other hooks are kept.
 - The previous file is backed up to `~/.leash/backups/` before it changes.
@@ -65,12 +71,12 @@ leash uninstall                     # remove from every agent
 
 On first install, `~/.leash/policies/` is created with the bundled presets.
 For existing installs, the **coding-agent** preset (`coding_agent.yaml`) is
-added. It applies to agents named `claude-code*`, `copilot*`, `cursor*` and
-`codex*`, and:
+added. It applies to agents named `claude-code*`, `copilot*`, `cursor*`,
+`codex*` and `openclaw*`, and:
 
 - **Blocks** destructive commands (`rm -rf /`, `rm -rf ~`, `mkfs`, `dd of=/dev/…`, piping `curl` into `sh`).
 - **Blocks** reading credentials (`~/.ssh`, `~/.aws/credentials`, `~/.config/gh/hosts.yml`, `.netrc`, `.pypirc`, …).
-- **Blocks** the agent from editing Leash or its own hook settings.
+- **Blocks** the agent from editing Leash or its own hook settings, and from running `leash allow` or `leash uninstall`.
 - **Asks** before `sudo`, force-pushes, `git reset --hard`, publishing packages, `terraform apply`, `kubectl delete`, reading `.env` files, or writing outside the workspace.
 - **Allows** everything else.
 
@@ -119,7 +125,30 @@ prompt with Leash's reason. Some agents can't prompt everywhere:
 | Claude Code, Copilot CLI | Prompts |
 | Cursor | Prompts for shell and MCP calls; blocks other tools |
 | Codex | Blocks (Codex hooks can't prompt) |
+| OpenClaw | Pauses for `/approve` (allow once or deny) |
 | Leash server `/authorize` | Blocks with "Requires human approval" |
+
+When a hook allows a call it prints nothing (or `{}`): an empty answer means
+"no objection", and the agent carries on with its normal permission checks.
+
+### Allowing something Leash flagged
+
+You rarely need to edit YAML to make an exception:
+
+```bash
+leash explain                      # the most recent deny/ask, in plain English, with options
+leash explain 3                    # the third most recent
+leash allow                        # always allow exactly that call, for that agent
+leash allow --pattern '/Users/me/notes/*'   # ...or everything matching a glob
+leash allow --all-agents           # ...for every agent, not just the one that was flagged
+leash allow --dry-run              # show the rule without saving it
+leash allow --undo                 # remove the last rule you added
+```
+
+Rules go into `~/.leash/policies/my_rules.yaml` (`priority: 100`, so they're
+checked before the presets). `leash allow` shows the rule and asks you to
+confirm; it needs an interactive terminal unless you pass `--yes`, and the
+coding-agent preset denies agents from running it.
 
 ### Testing rules
 

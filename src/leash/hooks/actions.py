@@ -6,7 +6,7 @@ differently.  Policies are written once against a small vocabulary:
 =========================  ======================================  ==========================
 action                     resource                                example host tools
 =========================  ======================================  ==========================
-``shell.exec``             the command, and each sub-command       Bash, bash, Shell
+``shell.exec``             the command, and each sub-command       Bash, bash, Shell, exec
 ``file.read``              absolute, symlink-resolved path         Read, view
 ``file.write``             absolute, symlink-resolved path         Write, Edit, apply_patch
 ``file.delete``            absolute, symlink-resolved path         Delete
@@ -35,7 +35,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 SHELL_TOOLS = {
     "bash", "powershell", "shell", "run_terminal_cmd", "exec_command",
-    "local_shell", "container.exec", "run_shell_command",
+    "local_shell", "container.exec", "run_shell_command", "exec",
 }
 READ_TOOLS = {"read", "view", "read_file", "notebookread"}
 WRITE_TOOLS = {

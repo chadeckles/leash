@@ -1,393 +1,139 @@
 # OpenClaw Integration Guide
 
-[OpenClaw](https://github.com/openclaw/openclaw) is a popular open-source personal AI assistant that can run shell commands, browse the web, read/write files, and coordinate multi-agent sessions across WhatsApp, Telegram, Slack, Discord, and more.
+[OpenClaw](https://github.com/openclaw/openclaw) is a popular open-source personal AI assistant. You can message it from WhatsApp, Telegram, Slack, Discord and more, and it can run shell commands, browse the web, read and write files, control paired devices and schedule jobs. That's a lot of power in something other people can send messages to, so a single malicious message could try to make it do any of those things.
 
-That's a lot of power — and by default, OpenClaw has no external authorization layer. Leash adds one.
+Leash adds a check in front of every one of those tool calls.
 
-## Why Leash + OpenClaw
+!!! tip "New to all this?"
+    [Start Here](start-here.md) walks through installing Leash from scratch in plain English.
 
-OpenClaw's built-in `tools.allow` / `tools.deny` config controls which tools *exist*. Leash goes further:
-
-| Feature | OpenClaw built-in | With Leash |
-|---|---|---|
-| Allow/deny tools | ✔ | ✔ |
-| Rate limiting per action | ✘ | ✔ |
-| Tamper-evident audit trail | ✘ | ✔ |
-| Observe mode (shadow before enforce) | ✘ | ✔ |
-| Cross-agent policy management | ✘ | ✔ |
-| OWASP threat tagging | ✘ | ✔ |
-
-## How It Works
-
-OpenClaw's tools map directly to Leash action names. When you wrap OpenClaw with Leash, every tool call is checked against your YAML policy before it executes:
-
-```
-OpenClaw Agent
-      │
-      ▼
-   Leash (allow/deny + audit log)
-      │
-      ▼
-   Tool executes (exec, read, browser, etc.)
-```
-
-## OpenClaw's Tool Catalog
-
-These are the default tools OpenClaw exposes — each one becomes a Leash action. Your instance may have additional tools from installed skills or plugins; use `leash audit scan` after observe mode to discover the full set.
-
-| Category | Tools | Risk |
-|---|---|---|
-| **File I/O** | `read`, `write`, `edit`, `apply_patch` | 🟡 Medium |
-| **Runtime** | `exec`, `process`, `code_execution` | 🔴 High |
-| **Web** | `web_search`, `web_fetch`, `x_search` | 🟡 Medium |
-| **Browser** | `browser` | 🔴 High |
-| **Canvas** | `canvas` | 🟡 Medium |
-| **Memory** | `memory_search`, `memory_get` | 🟢 Low |
-| **Sessions** | `sessions_list`, `sessions_history`, `sessions_send`, `sessions_spawn`, `session_status` | 🟡 Medium |
-| **Automation** | `cron`, `gateway` | 🔴 High |
-| **Devices** | `nodes` | 🔴 High |
-| **Messaging** | `message` | 🟡 Medium |
-
-## Quick Setup
-
-### 1. Install and start Leash
+## Setup
 
 ```bash
-uv tool install 'leash[server]'
-leash start
+uv tool install leash     # or: pipx install leash
+leash install openclaw
 ```
 
-Server starts on http://localhost:8000. Open http://localhost:8000/docs for the interactive API reference.
-
-### 2. Register your OpenClaw agent
+Then restart OpenClaw (or run `openclaw plugins reload leash`) and check:
 
 ```bash
-leash agents register --name "openclaw-agent"
+leash doctor
 ```
 
-You'll see output like:
+That's the whole setup. There's no server and no agent registration.
+
+### What `leash install openclaw` does
+
+1. Copies a small, dependency-free plugin to `~/.leash/integrations/openclaw/`.
+2. Links it into OpenClaw with OpenClaw's own CLI: `openclaw plugins install --link ~/.leash/integrations/openclaw --force`. Leash never edits `openclaw.json` itself.
+3. Installs `~/.leash/policies/openclaw.yaml`. If you had the old server-era OpenClaw preset, it's backed up to `~/.leash/backups/` first.
+
+If the `openclaw` command isn't on your PATH, Leash still writes the plugin and prints the exact `openclaw plugins install --link …` command to run later. `leash doctor` warns you until the plugin is linked.
+
+To remove it, run `leash uninstall openclaw`. This unlinks the plugin through the OpenClaw CLI and deletes the plugin files.
+
+## How it works
 
 ```
-  ✔ Registered 'openclaw-agent'
-  ID:     a1b2c3d4-e5f6-7890-abcd-ef1234567890
-  Type:   —
-  Vendor: —
-
-  Policies applied: openclaw-policy
-  Effective rules:  ✔ 10 allow   ✘ 12 deny
-
-  Token saved → ~/.leash/agents/openclaw-agent.json
+message ─▶ OpenClaw ─▶ before_tool_call ─▶ Leash plugin ─▶ leash hook openclaw
+                                                                  │
+                         block / ask for approval / continue ◀────┘
 ```
 
-The agent ID and token are saved automatically. Leash policies match on the **agent name** (via wildcard patterns like `*openclaw*`), so naming is what matters here.
+The plugin registers a `before_tool_call` hook. For every tool call it runs `leash hook openclaw`, passing it the tool name, its parameters, the working directory and the session. Leash evaluates your policies locally and answers:
 
-!!! tip "Optional metadata flags"
-    You can add `--vendor openclaw --type assistant` for fleet management and filtering later, but these don't affect policy matching.
-
-### 3. Verify the built-in policy works
-
-Leash ships with an OpenClaw policy preset that is seeded to `~/.leash/policies/openclaw.yaml` on first server start. It matches any agent with "openclaw" or "claw" in the name. Confirm it applied:
-
-```bash
-leash policy test --action read --agent "openclaw-agent"
-leash policy test --action exec --agent "openclaw-agent"
-```
-
-You should see `read → allow` and `exec → deny`. That's deny-by-default working.
-
-The built-in policy defaults:
-
-- ✔ **Allowed:** `read`, `web_search`, `web_fetch`, `x_search`, `memory_search`, `memory_get`, `sessions_list`, `sessions_history`, `sessions_send` (rate-limited: 30/min), `session_status`, `cron` (rate-limited: 20/hour)
-- ✘ **Denied:** `exec`, `process`, `code_execution`, `write`, `edit`, `apply_patch`, `browser`, `canvas`, `gateway`, `nodes`, `sessions_spawn`
-
-!!! warning "Messaging is denied by default"
-    The `message` tool (WhatsApp, Telegram, Slack, Discord) is not explicitly listed in the built-in policy, so it falls through to the catch-all deny rule. If your OpenClaw setup relies on messaging, add an explicit allow rule — see [Example Policies](#example-policies) below.
-
-### 4. Integrate with your OpenClaw agent code
-
-#### Option A: Python SDK
-
-Install the SDK with `pip install leash` or `uv add leash`. Wrap your OpenClaw tool functions so every call is authorized, executed, and audit-logged automatically:
-
-```python
-from leash import LeashAgent
-
-agent = LeashAgent(name="openclaw-agent")
-
-@agent.tool("exec")
-def run_command(command: str):
-    """Wraps OpenClaw's exec tool with Leash authorization."""
-    import subprocess
-    return subprocess.run(command, shell=True, capture_output=True, text=True)
-
-@agent.tool("web_fetch")
-def fetch_page(url: str):
-    """Wraps web_fetch with Leash authorization."""
-    import httpx
-    return httpx.get(url).text
-
-# Use as a context manager — connects on entry, cleans up on exit:
-with agent:
-    fetch_page("https://example.com")   # ✔ allowed by policy
-    run_command("ls -la")                # ✘ denied — LeashDenied raised
-```
-
-The `@agent.tool` decorator handles the full cycle: authorize → execute → audit. If the action is denied, the function **never runs**. If Leash is unreachable, it **denies by default** (fail-closed).
-
-For existing tool functions you don't want to redecorate, use `agent.guard()`:
-
-```python
-guarded = agent.guard([run_command, fetch_page])
-```
-
-See the [SDK Reference](sdk-reference.md) for the full API.
-
-#### Option B: REST API (any language)
-
-Call Leash before each OpenClaw tool execution. The agent ID and token come from Step 2 — they're saved in `~/.leash/agents/openclaw-agent.json`:
-
-```bash
-# Load your agent's credentials:
-export AGENT_ID=$(cat ~/.leash/agents/openclaw-agent.json | jq -r .agent_id)
-export TOKEN=$(cat ~/.leash/agents/openclaw-agent.json | jq -r .token)
-
-# Check permission before running 'exec':
-curl -s -X POST http://localhost:8000/authorize \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"agent_id": "'$AGENT_ID'", "action": "exec"}' | jq .decision
-```
-
-If the response is `"allow"`, proceed. If `"deny"`, skip the tool call.
-
-## The Scan-First Workflow (Recommended)
-
-The built-in policy is a solid starting point, but the best policies are built from real data. If you want to customize beyond the defaults, don't guess — **observe first, then write policy.**
-
-!!! tip "Why scan first?"
-    Different agents use different action names. OpenClaw's tool names are well-documented, but skills and plugins can add anything. If your policy uses the wrong action name, it blocks nothing and gives you a false sense of security. Scanning shows you what the agent *actually* calls.
-
-### 1. Deploy in observe mode
-
-Create `~/.leash/policies/openclaw_observe.yaml`:
-
-```yaml
-name: openclaw-observe
-mode: observe
-priority: 25
-agents:
-  - "*openclaw*"
-
-rules:
-  - action: "exec"
-    effect: deny
-    reason: "Would deny shell execution"
-
-  - action: "browser"
-    effect: deny
-    reason: "Would deny browser control"
-
-  - action: "write"
-    effect: deny
-    reason: "Would deny file writes"
-```
-
-With `mode: observe`, these deny rules **log** what would be blocked but **never actually block**. Your agent keeps working while Leash records every would-be denial as `observe_deny` in the audit trail.
-
-### 2. Let the agent run, then scan
-
-```bash
-# See what the agent actually did:
-leash audit scan --agent <agent-id>
-
-# Check observe-mode shadow denials:
-leash audit log --decision observe_deny --limit 50
-
-# Export the full action vocabulary:
-leash audit export --agent <agent-id> --decision observe_deny
-```
-
-### 3. Promote to enforce
-
-If the observe results look right — the agent isn't calling `exec` legitimately, and you're comfortable blocking it — change the policy:
-
-```yaml
-name: openclaw-enforce
-mode: enforce          # ← flip from observe to enforce
-priority: 25
-agents:
-  - "*openclaw*"
-
-rules:
-  - action: "exec"
-    effect: deny
-    reason: "Shell execution is blocked"
-  # ... rest of your rules
-```
-
-No restart needed — Leash picks up YAML changes automatically.
-
-For the full scan-first walkthrough, see [Write Your First Policy](write-your-first-policy.md).
-
-## Example Policies
-
-!!! info "How priority works"
-    Policies are evaluated from **highest priority number to lowest**. The built-in `openclaw-policy` has `priority: 20`. To override it, set a higher number (e.g. `priority: 25`). Within a policy, rules are evaluated top-to-bottom — **first match wins**.
-
-### Read-only research agent
-
-Allow searching and reading, deny everything else:
-
-```yaml
-name: openclaw-researcher
-priority: 25
-agents: ["*research*", "*openclaw*"]
-rules:
-  - action: "read"
-    effect: allow
-    reason: "May read workspace files"
-  - action: "web_search"
-    effect: allow
-    reason: "May search the web"
-  - action: "web_fetch"
-    effect: allow
-    reason: "May fetch web pages"
-  - action: "memory_*"
-    effect: allow
-    reason: "May use memory"
-  - action: "*"
-    effect: deny
-    reason: "Everything else is blocked"
-```
-
-### Coding agent (read + write, no exec)
-
-```yaml
-name: openclaw-coder
-priority: 25
-agents: ["*coder*", "*coding*"]
-rules:
-  - action: "read"
-    effect: allow
-    reason: "May read files"
-  - action: "write"
-    effect: allow
-    reason: "May write files"
-  - action: "edit"
-    effect: allow
-    reason: "May edit files"
-  - action: "apply_patch"
-    effect: allow
-    reason: "May apply patches"
-  - action: "web_search"
-    effect: allow
-    reason: "May search for docs"
-  - action: "exec"
-    effect: deny
-    reason: "No shell access"
-  - action: "browser"
-    effect: deny
-    reason: "No browser access"
-  - action: "*"
-    effect: deny
-    reason: "Everything else is blocked"
-```
-
-### Messaging agent (WhatsApp, Telegram, Slack)
-
-If your OpenClaw setup is primarily for messaging, you'll need to explicitly allow the `message` tool (it's denied by default):
-
-```yaml
-name: openclaw-messenger
-priority: 25
-agents: ["*openclaw*"]
-rules:
-  - action: "message"
-    effect: allow
-    reason: "May send messages to connected platforms"
-    rate_limit:
-      max_calls: 30
-      window: 60
-  - action: "read"
-    effect: allow
-    reason: "May read files for context"
-  - action: "web_search"
-    effect: allow
-    reason: "May search the web"
-  - action: "memory_*"
-    effect: allow
-    reason: "May use memory"
-  - action: "*"
-    effect: deny
-    reason: "Everything else is blocked"
-```
-
-### Full-trust agent with rate limits
-
-For your personal main session where you trust the agent but want audit logging and rate limits:
-
-```yaml
-name: openclaw-trusted
-priority: 30
-agents: ["*openclaw-main*"]
-rules:
-  - action: "exec"
-    effect: allow
-    reason: "Trusted agent may run commands"
-    rate_limit:
-      max_calls: 60
-      window: 300
-
-  - action: "write"
-    effect: allow
-    reason: "Trusted agent may write files"
-
-  - action: "browser"
-    effect: allow
-    reason: "Trusted agent may use browser"
-    rate_limit:
-      max_calls: 20
-      window: 300
-
-  - action: "*"
-    effect: allow
-    reason: "Trusted agent — all actions allowed with audit logging"
-```
-
-## Verifying the Integration
-
-After setup, use these commands to confirm everything is wired up:
-
-```bash
-# Check what your agent can do (use agent ID from step 2):
-leash agents permissions <agent-id>
-
-# Test specific actions without running anything:
-leash policy test --action read --agent "openclaw-agent"
-leash policy test --action exec --agent "openclaw-agent"
-
-# Watch decisions in real time:
-leash dashboard
-
-# See the audit trail:
-leash audit log --agent <agent-id> --limit 20
-
-# Scan for suspicious patterns:
-leash audit scan --agent <agent-id>
-```
-
-## OpenClaw Tool Groups → Leash Actions
-
-OpenClaw supports tool groups in its config. Here's how they map to Leash actions:
-
-| OpenClaw Group | Leash Actions |
+| Leash says | OpenClaw does |
 |---|---|
-| `group:runtime` | `exec`, `process`, `code_execution` |
-| `group:fs` | `read`, `write`, `edit`, `apply_patch` |
-| `group:sessions` | `sessions_list`, `sessions_history`, `sessions_send`, `sessions_spawn`, `session_status` |
-| `group:memory` | `memory_search`, `memory_get` |
-| `group:web` | `web_search`, `web_fetch`, `x_search` |
-| `group:ui` | `browser`, `canvas` |
-| `group:automation` | `cron`, `gateway` |
-| `group:messaging` | `message` |
-| `group:nodes` | `nodes` |
+| **allow** | Continues. OpenClaw's own `tools.allow` / `tools.deny` and approval settings still apply. |
+| **ask** | Pauses and asks you to approve (`/approve` in chat, or the approval button in apps that support it). Only *allow once* is offered; to allow permanently, use `leash allow` (below). |
+| **deny** | Blocks the call and tells the assistant why. |
+
+**Fail-closed:** if `leash` is missing, crashes, returns something unexpected or takes longer than 10 seconds, the plugin blocks the call. OpenClaw itself also blocks calls when a `before_tool_call` hook fails.
+
+Every decision is written to `~/.leash/audit/audit.jsonl`. Watch it live with `leash audit tail -f`.
+
+## What's protected by default
+
+OpenClaw's file and shell tools use the same actions as coding agents:
+
+| OpenClaw tool | Leash action | Resource |
+|---|---|---|
+| `exec` | `shell.exec` | the command, and each sub-command |
+| `read` | `file.read` | absolute path |
+| `write`, `edit`, `apply_patch` | `file.write` | absolute path |
+| `web_fetch` | `web.fetch` | URL |
+| `web_search` | `web.search` | query |
+| MCP tools | `mcp.<server>.<tool>` | |
+| everything else (`browser`, `cron`, `nodes`, `message`, `gateway`, `sessions_spawn`, …) | `tool.<name>` | |
+| Code Mode's outer `exec` (runs JavaScript) | `tool.code_mode_exec` | |
+
+This means all of the [coding-agent guardrails](hooks.md#the-policy) apply to OpenClaw: `rm -rf ~`, reading SSH keys and cloud credentials, `curl … | sh`, and tampering with `~/.leash` are denied, while force-push, `sudo`, reading `.env` and writing outside the workspace ask first. (For OpenClaw, the workspace is `OPENCLAW_WORKSPACE_DIR` or `~/.openclaw/workspace`.)
+
+On top of that, `~/.leash/policies/openclaw.yaml` adds:
+
+| Rule | Effect |
+|---|---|
+| Edit or delete `openclaw.json` or installed plugins (`extensions/`) | **deny**, so the assistant can't switch Leash off |
+| Read or touch `~/.openclaw/credentials/` (channel logins) | **deny** |
+| `openclaw plugins …`, `openclaw config …`, shell access to `openclaw.json` | ask |
+| Read `openclaw.json` (it can contain API keys) | ask |
+| `tool.gateway` (can change config, restart or update OpenClaw) | ask |
+| `tool.nodes` (camera, screen, location on paired devices) | ask |
+| `tool.cron` (jobs that run without you) | ask |
+| `tool.message` | allow, rate-limited to 30 per minute |
+
+Anything not listed falls through to the coding-agent policy, which allows it.
+
+## Everyday use
+
+```bash
+leash audit tail -f           # watch what OpenClaw does
+leash explain                 # why was the last call blocked or held for approval?
+leash allow                   # allow exactly that from now on (asks you to confirm)
+leash allow --undo            # changed your mind
+```
+
+`leash allow` writes to `~/.leash/policies/my_rules.yaml`, which is checked before every other policy. By default the rule only applies to OpenClaw (`conditions: {host: openclaw}`). The assistant itself can't run `leash allow`: the coding-agent policy denies it, and the command requires an interactive terminal.
+
+## Customizing
+
+Edit `~/.leash/policies/openclaw.yaml`, or add rules to `my_rules.yaml`. Rules are checked top to bottom and the first match wins. Some examples:
+
+```yaml
+# Never let the assistant use the browser
+- action: "tool.browser"
+  effect: deny
+  reason: "No browser automation"
+
+# Ask before it spawns sub-agents
+- action: "tool.sessions_spawn"
+  effect: ask
+  reason: "Sub-agents need approval"
+
+# Deny all shell commands (a read-only assistant)
+- action: "shell.exec"
+  effect: deny
+  reason: "This assistant may not run commands"
+```
+
+Test changes without involving OpenClaw:
+
+```bash
+leash policy test --local --agent openclaw -a tool.cron -a shell.exec -r 'ls -la'
+leash doctor
+```
+
+Not sure what your assistant calls? Run it for a while with `LEASH_MODE=observe` set in OpenClaw's environment (decisions are logged, nothing is blocked), then read `leash audit tail`.
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `leash doctor`: *plugin files exist but aren't linked* | Run the `openclaw plugins install --link …` command it prints, then restart OpenClaw. |
+| Every tool call is blocked with *"Blocked by Leash (fail-closed): …"* | The plugin can't run `leash`. Check that `leash --version` works for the user OpenClaw runs as, then re-run `leash install openclaw` (it records the full path to `leash`). |
+| Nothing shows up in `leash audit tail` | Check `openclaw plugins inspect leash --runtime` and make sure OpenClaw was restarted after installing. |
+| A config using `$include` isn't detected as linked | `leash doctor` searches `openclaw.json` for the plugin path. If you split your config, verify with `openclaw plugins inspect leash`. |
+
+## Advanced: server and SDK
+
+If you build your own agents on OpenClaw's code, or want central policy management, you can also use the [Leash server and Python SDK](sdk-reference.md). Most people don't need this. The plugin above covers OpenClaw's own tool calls with no server.

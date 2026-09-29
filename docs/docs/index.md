@@ -30,12 +30,15 @@ Your Agent ──▶ Leash ──▶ allow or deny
 - **Developers** building AI agents that call tools (LangChain, CrewAI, custom code)
 - **Teams** deploying MCP servers with Claude Desktop, Cursor, or Windsurf
 - **Security engineers** who need governance over what agents can do
-- **Anyone running [OpenClaw](https://github.com/openclaw/openclaw)** who wants authorization and audit on top
+- **Anyone running [OpenClaw](https://github.com/openclaw/openclaw)** who wants guardrails on top (`leash install openclaw`)
+- **Anyone trying Claude Code, Copilot CLI, Cursor or Codex** who wants to experiment safely (`leash install`)
 
 ## Quick Links
 
 | I want to... | Go here |
 |---|---|
+| **Learn from scratch (new to AI agents)** | **[Start Here](start-here.md)** |
+| Guard Claude Code, Copilot CLI, Cursor or Codex | [Coding Agents (Hooks)](hooks.md) |
 | Get running in 60 seconds | [Getting Started](getting-started.md) |
 | Write rules for my agent | [Write Your First Policy](write-your-first-policy.md) |
 | Govern my OpenClaw assistant | [OpenClaw Integration](openclaw-guide.md) |

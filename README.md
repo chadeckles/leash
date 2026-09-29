@@ -14,9 +14,17 @@
 
 **Keep your AI agents on a leash.**
 
-You wouldn't let a dog roam the neighborhood unsupervised, so why let an AI agent read your files, send emails, and call APIs _without_ guardrails? Leash is an API-layer policy engine that sits between your agent and the outside world — no containers, no sidecars, just authorization. You write simple YAML rules that say what's allowed. Everything else is denied. Every decision from allow or deny activities is logged in a cryptographically signed, hash-chained audit trail that's tamper-evident by design.
+You wouldn't let a dog roam the neighborhood unsupervised, so why let an AI agent run commands, edit your files and browse the web _without_ guardrails? Leash checks every action your agent takes **before it runs**: routine work goes through, dangerous things (`rm -rf ~`, reading your SSH keys, `curl … | sh`) are blocked, and risky-but-legitimate things (`git push --force`, reading `.env`) ask you first. Every decision is recorded in a tamper-evident log on your machine.
 
-One install, one policy file, and your agent is on a leash.
+```bash
+uv tool install leash    # 1. install
+leash install            # 2. connect it to Claude Code, Copilot CLI, Cursor, Codex or OpenClaw
+leash doctor             # 3. check you're protected
+```
+
+No server, no account, nothing leaves your computer.
+
+> 🎓 **New to AI agents or security?** Read **[Start Here: Your First 15 Minutes](docs/docs/start-here.md)** — a step-by-step walkthrough in plain English, from installing to your first blocked command and how to allow things Leash was too careful about.
 
 ## 🌟 Highlights
 
@@ -25,24 +33,34 @@ One install, one policy file, and your agent is on a leash.
 - 🔗 **Tamper-evident audit trail** — hash-chained and signed; deletions are detectable
 - 👀 **Observe mode** — shadow new rules in production before enforcing
 - 🔍 **Security scanner** — discover an MCP server's tools, classify risk, generate policies
-- 🤖 **Coding-agent guardrails** — `leash install` hooks Claude Code, Copilot CLI, Cursor and Codex in one command, with no server
+- 🤖 **Agent guardrails in one command** — `leash install` hooks Claude Code, Copilot CLI, Cursor, Codex and OpenClaw, with no server
 - 🙋 **Ask, don't just deny** — `effect: ask` sends risky actions to the agent's approval prompt
+- 💬 **Explains itself** — `leash explain` says why something was blocked; `leash allow` lets it through next time
 - 🧩 **Framework-agnostic** — agent hooks, Python SDK, MCP proxy, or plain REST
-- 🧠 **[OpenClaw ready](docs/docs/openclaw-guide.md)** — built-in policies for the popular open-source AI assistant
+- 🧠 **[OpenClaw support](docs/docs/openclaw-guide.md)** — `leash install openclaw` adds a fail-closed plugin to the popular open-source AI assistant
 - 🛡️ **OWASP mapped** — rules and audit checks reference [OWASP ASI](https://owasp.org/www-project-agentic-security-initiative/) and [LLM Top 10](https://owasp.org/www-project-top-10-for-large-language-model-applications/) threat IDs
 - ⚡ **Small core** — `pip install leash` for SDK/CLI/engine, or `leash[server]` to run the server
 - 📖 **[Full documentation](docs/docs/index.md)** — getting started, policy writing guide, SDK reference, CLI reference, architecture
 
 ## ⬇️ Installation
 
-### Coding agents (Claude Code, Copilot CLI, Cursor, Codex)
+### AI agents (Claude Code, Copilot CLI, Cursor, Codex, OpenClaw)
 
 ```bash
-uv tool install leash    # or: pipx install leash
-leash install            # hooks every coding agent it finds
+uv tool install leash    # or: pipx install leash   (no uv? see Start Here)
+leash install            # hooks every agent it finds; restart them afterwards
 ```
 
-That's it: no server and no registration. Every shell command, file edit, web fetch and MCP call your agents make is checked against `~/.leash/policies/` before it runs. Destructive commands and credential reads are blocked, and risky actions (force-push, `sudo`, publishing) ask you first. Watch decisions with `leash audit tail -f`. See the [coding agents guide](docs/docs/hooks.md).
+That's it: no server and no registration. Every shell command, file edit, web fetch and MCP call your agents make is checked against `~/.leash/policies/` before it runs. Destructive commands and credential reads are blocked, and risky actions (force-push, `sudo`, publishing) ask you first.
+
+```bash
+leash audit tail -f      # watch what your agent does
+leash explain            # why was that blocked?
+leash allow              # ...let it through from now on (leash allow --undo to revert)
+leash uninstall          # turn it off
+```
+
+See [Start Here](docs/docs/start-here.md) for a guided walkthrough, or the [coding agents guide](docs/docs/hooks.md) for details.
 
 ### Server (Python SDK, REST API, dashboard)
 
@@ -129,17 +147,13 @@ See the [MCP Proxy Guide](docs/docs/mcp-proxy-guide.md) for Claude Desktop confi
 
 ### OpenClaw
 
-[OpenClaw](https://github.com/openclaw/openclaw) is a popular open-source personal AI assistant. It can run shell commands, browse the web, and manage files — all of which Leash can govern. Leash ships with a built-in OpenClaw policy:
+[OpenClaw](https://github.com/openclaw/openclaw) is a popular open-source personal AI assistant you can message from WhatsApp, Telegram, Discord and more. It can run shell commands, browse the web and manage files — so a malicious message could try to make it do any of those.
 
 ```bash
-# Register your OpenClaw agent
-leash agents register --name "openclaw-agent" --vendor openclaw
-
-# The built-in policy allows reads and web search, denies exec and browser.
-# Customize ~/.leash/policies/openclaw.yaml to match your needs.
+leash install openclaw
 ```
 
-See the full [OpenClaw Integration Guide](docs/docs/openclaw-guide.md) for setup, example policies, and tool mappings.
+This adds a small Leash plugin to OpenClaw's `before_tool_call` hook. Denied calls are blocked, `ask` pauses OpenClaw for your `/approve`, and if Leash is unavailable the call is blocked (fail-closed). OpenClaw gets the coding-agent guardrails plus extra rules that protect its config, plugins and channel credentials. See the [OpenClaw guide](docs/docs/openclaw-guide.md).
 
 ### REST API
 
@@ -191,9 +205,11 @@ Rules also support rate limiting, ABAC conditions, and OWASP threat tags — see
 ## 🔍 CLI Cheat Sheet
 
 ```bash
-leash install                             # hook your coding agents (no server)
+leash install                             # hook your agents (no server)
 leash hosts                               # which agents are hooked
 leash audit tail -f                       # watch local hook decisions
+leash explain                             # why was the last thing blocked?
+leash allow                               # allow it from now on (--undo to revert)
 leash policy test --local -a shell.exec -r "git push --force"
 leash status                              # server health
 leash agents list                         # registered agents

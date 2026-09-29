@@ -1,6 +1,7 @@
 # Coding-agent guardrails
 #
-# Used by `leash hook` for Claude Code, GitHub Copilot CLI, Cursor and Codex.
+# Used by `leash hook` for Claude Code, GitHub Copilot CLI, Cursor, Codex and
+# OpenClaw (which also gets the extra rules in openclaw.yaml).
 # Normal development work is allowed; destructive or credential-stealing
 # actions are blocked; risky-but-legitimate actions ask you first.
 #
@@ -26,6 +27,7 @@ agents:
   - "copilot*"
   - "cursor*"
   - "codex*"
+  - "openclaw*"
 
 rules:
   # ── Tamper protection: Leash itself and the hosts' hook configuration ──
@@ -71,9 +73,14 @@ rules:
     reason: "Changing repository agent hooks needs your approval"
     owasp: ["ASI03"]
   - action: "shell.exec"
-    resource: "leash uninstall*"
+    resource: "*leash uninstall*"
     effect: deny
     reason: "Agents may not remove Leash"
+    owasp: ["ASI03"]
+  - action: "shell.exec"
+    resource: "*leash allow*"
+    effect: deny
+    reason: "Agents may not approve their own Leash exceptions; run `leash allow` yourself in a terminal"
     owasp: ["ASI03"]
   - action: "shell.exec"
     resource: "*.leash/*"

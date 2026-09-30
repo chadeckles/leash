@@ -392,6 +392,8 @@ with open(os.path.join(home, "openclaw-calls.log"), "a") as fh:
     fh.write(" ".join(sys.argv[1:]) + "\\n")
 args = sys.argv[1:]
 if args[:3] == ["plugins", "install", "--link"]:
+    if "--force" in args:  # like OpenClaw >= 2026.6
+        sys.exit("error: --force is not supported with --link")
     open(cfg, "w").write(json.dumps({{"plugins": {{"load": {{"paths": [args[3]]}}}}}}))
 elif args[:2] == ["plugins", "uninstall"]:
     open(cfg, "w").write("{{}}")
@@ -478,6 +480,7 @@ console.log(JSON.stringify(out));
     assert "ls" not in out  # allow → undefined → no opinion
     assert out["rm"]["block"] is True and "home directory" in out["rm"]["blockReason"]
     assert out["cron"]["requireApproval"]["allowedDecisions"] == ["allow-once", "deny"]
+    assert out["cron"]["requireApproval"]["timeoutBehavior"] == "deny"
     assert out["missing"]["decision"] == "deny" and "fail-closed" in out["missing"]["reason"]
 
 

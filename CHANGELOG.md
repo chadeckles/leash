@@ -25,6 +25,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - `leash uninstall` with no agent names failed on Python 3.11 (an argparse quirk with `choices`); agent names are now validated directly.
 - `leash install openclaw` also runs `openclaw plugins enable leash` after linking (not fatal if it fails; the manual command is printed).
 - `scripts/openclaw_live_test.py`: an end-to-end test against a real OpenClaw install, run in a throwaway sandbox (isolated HOME, a fake local model, no API key, fake secrets). It checks allow, deny, ask, fail-closed and uninstall, and writes a report. It drives the `openclaw` you already have, with its state redirected into the sandbox; `--install-openclaw` npm-installs a throwaway copy instead. Leash adds no Node requirement of its own.
+- **Fixed: OpenClaw plugin link on every OpenClaw version.** `leash install openclaw` passed `--force` to `openclaw plugins install --link`; older OpenClaw doesn't have that flag and newer OpenClaw rejects it with `--link`, so the plugin was never linked. Linking is idempotent, so the flag is simply dropped. Leash only uses OpenClaw CLI flags that exist in both 2026.3 and 2026.6.
+- The OpenClaw plugin sets `timeoutBehavior: "deny"` on approval requests, so an unanswered "ask" never runs (this matches OpenClaw's default, but no longer depends on it).
+- The live test works across OpenClaw versions: it runs scenarios with `openclaw agent --local --session-id … --message …`, falls back to plain `plugins inspect --json` if `--runtime` isn't supported, and points OpenClaw at an unused gateway port so it can never reach a gateway you already have running.
 - `leash doctor` no longer fails on a missing server once hooks have been used (even after `leash uninstall`); `leash allow --undo` names the original rule rather than its lower-case copy.
 
 ### Coding-agent hooks (Phase 2)

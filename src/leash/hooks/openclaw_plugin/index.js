@@ -91,6 +91,7 @@ export function toHookResult(verdict) {
         title: "Leash: approval needed",
         description: verdict.reason || "Leash policy requires your approval for this tool call.",
         severity: "warning",
+        timeoutBehavior: "deny",
         allowedDecisions: ["allow-once", "deny"],
       },
     };

@@ -25,7 +25,7 @@ That's the whole setup. There's no server and no agent registration.
 ### What `leash install openclaw` does
 
 1. Copies a small, dependency-free plugin to `~/.leash/integrations/openclaw/`.
-2. Links and enables it with OpenClaw's own CLI: `openclaw plugins install --link ~/.leash/integrations/openclaw --force`, then `openclaw plugins enable leash`. Leash never edits `openclaw.json` itself.
+2. Links and enables it with OpenClaw's own CLI: `openclaw plugins install --link ~/.leash/integrations/openclaw`, then `openclaw plugins enable leash`. Leash never edits `openclaw.json` itself.
 3. Installs `~/.leash/policies/openclaw.yaml`. If you had the old server-era OpenClaw preset, it's backed up to `~/.leash/backups/` first.
 
 If the `openclaw` command isn't on your PATH, Leash still writes the plugin and prints the exact `openclaw plugins install --link …` command to run later. `leash doctor` warns you until the plugin is linked.
@@ -131,7 +131,7 @@ Not sure what your assistant calls? Run it for a while with `LEASH_MODE=observe`
 |---|---|
 | `leash doctor`: *plugin files exist but aren't linked* | Run the `openclaw plugins install --link …` command it prints, then restart OpenClaw. |
 | Every tool call is blocked with *"Blocked by Leash (fail-closed): …"* | The plugin can't run `leash`. Check that `leash --version` works for the user OpenClaw runs as, then re-run `leash install openclaw` (it records the full path to `leash`). |
-| Nothing shows up in `leash audit tail` | Check `openclaw plugins inspect leash --runtime` and make sure OpenClaw was restarted after installing. |
+| Nothing shows up in `leash audit tail` | Check `openclaw plugins inspect leash` (add `--runtime` on newer OpenClaw to list its hooks) and make sure OpenClaw was restarted after installing. |
 | A config using `$include` isn't detected as linked | `leash doctor` searches `openclaw.json` for the plugin path. If you split your config, verify with `openclaw plugins inspect leash`. |
 
 ## Advanced: server and SDK

@@ -52,7 +52,8 @@ def plugin_dir() -> Path:
 
 
 def link_commands() -> List[List[str]]:
-    return [["openclaw", "plugins", "install", "--link", str(plugin_dir()), "--force"]]
+    # No --force: linking is idempotent, and OpenClaw >= 2026.6 rejects --force with --link.
+    return [["openclaw", "plugins", "install", "--link", str(plugin_dir())]]
 
 
 def enable_commands() -> List[List[str]]:

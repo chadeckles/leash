@@ -23,7 +23,7 @@ Requires Python 3.11+ (like Leash) and a working OpenClaw. Leash itself adds no
 Node requirement: its plugin uses only Node built-ins, so whatever Node your
 OpenClaw runs on is fine. Overrides (environment variables): OPENCLAW_BIN (which
 openclaw to use; default: the one on PATH), LEASH_SPEC (pip spec; default: this
-repo), OPENCLAW_AGENT_ARGS (e.g. "agent exec --json"), SCENARIO_TIMEOUT
+repo), OPENCLAW_AGENT_ARGS (default: "agent --local --json"), SCENARIO_TIMEOUT
 (seconds, default 180).
 
 At the end it prints a summary and writes openclaw-live-test-report.txt in the
@@ -226,6 +226,9 @@ def main() -> int:
         "HOME": str(home), "USERPROFILE": str(home),
         "OPENCLAW_STATE_DIR": str(home / ".openclaw"), "OPENCLAW_WORKSPACE_DIR": str(proj),
         "OPENCLAW_TELEMETRY_ENDPOINT": "http://127.0.0.1:9/", "DO_NOT_TRACK": "1",
+        # A port nothing listens on, so the test can never reach a real OpenClaw gateway you have running.
+        "OPENCLAW_GATEWAY_PORT": "18997",
+        "NO_COLOR": "1", "FORCE_COLOR": "0",
         "npm_config_cache": str(sb / "npm-cache"), "npm_config_update_notifier": "false",
         "npm_config_fund": "false", "npm_config_audit": "false",
         "PATH": os.pathsep.join([str(sb / "venv" / "bin"), str(npm / "node_modules" / ".bin"), os.environ["PATH"]]),
@@ -288,18 +291,21 @@ def main() -> int:
         linked = "integrations/openclaw" in (home / ".openclaw" / "openclaw.json").read_text()
         result("leash install openclaw", "PASS" if code == 0 and linked else "FAIL",
                "plugin linked in openclaw.json" if linked else "plugin NOT linked")
-        step("plugins list", [str(oc), "plugins", "list"], env, 120)
+        # --runtime (lists registered hooks) only exists on newer OpenClaw; fall back to plain inspect.
         code, out = step("inspect", [str(oc), "plugins", "inspect", "leash", "--runtime", "--json"], env, 120)
-        hooks_ok = "before_tool_call" in out
-        result("plugin loads in OpenClaw", "PASS" if hooks_ok else ("UNKNOWN" if code == 0 else "FAIL"),
-               "registers before_tool_call" if hooks_ok else "inspect didn't show the hook (see output)")
+        if code != 0 and "unknown option" in out:
+            code, out = step("inspect", [str(oc), "plugins", "inspect", "leash", "--json"], env, 120)
+        if "before_tool_call" in out:
+            result("plugin loads in OpenClaw", "PASS", "registers before_tool_call")
+        elif code == 0 and '"loaded"' in out:
+            result("plugin loads in OpenClaw", "PASS", "status loaded (this OpenClaw can't list hooks; scenarios prove it)")
+        else:
+            result("plugin loads in OpenClaw", "FAIL" if code else "UNKNOWN", "see inspect output above")
         step("doctor", ["leash", "doctor"], env, 120, cwd=proj)
 
         # 4. scenarios, driven through OpenClaw's headless agent
-        agent_args = shlex.split(os.getenv("OPENCLAW_AGENT_ARGS", ""))
-        if not agent_args:
-            probe, _ = run([str(oc), "agent", "exec", "--help"], env, 60)
-            agent_args = ["agent", "exec", "--json"] if probe == 0 else ["agent", "--local", "--json"]
+        # `agent --local` runs one embedded turn; the workspace comes from the config written above.
+        agent_args = shlex.split(os.getenv("OPENCLAW_AGENT_ARGS", "agent --local --json"))
         log(f"\n== Scenarios (via `openclaw {' '.join(agent_args)}`) ==")
         timeout = int(os.getenv("SCENARIO_TIMEOUT", "180"))
         leash_json = home / ".leash" / "integrations" / "openclaw" / "leash.json"
@@ -311,9 +317,7 @@ def main() -> int:
                 leash_json.write_text(json.dumps({"command": ["/nonexistent/leash", "hook", "openclaw"]}))
             try:
                 msg = f"scenario:{name} (Leash live test: {desc})"
-                cmd = [str(oc), *agent_args, "--message", msg]
-                if agent_args[:2] == ["agent", "exec"]:
-                    cmd += ["--cwd", str(proj)]
+                cmd = [str(oc), *agent_args, "--session-id", f"leash-live-{name}", "--message", msg]
                 code, out = step(name, cmd, env, timeout, cwd=proj)
             finally:
                 if original is not None:
@@ -358,7 +362,6 @@ def main() -> int:
         gone = "integrations/openclaw" not in (home / ".openclaw" / "openclaw.json").read_text()
         result("leash uninstall openclaw", "PASS" if code == 0 and gone else "FAIL",
                "plugin unlinked" if gone else "plugin still listed in openclaw.json")
-        step("plugins list", [str(oc), "plugins", "list"], env, 120)
     finally:
         if server:
             server.shutdown()

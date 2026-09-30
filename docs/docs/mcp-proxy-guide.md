@@ -52,7 +52,7 @@ python -m sdk.mcp_proxy \
     -- npx -y @modelcontextprotocol/server-filesystem /data
 ```
 
-That's it. The proxy registers as `fs-agent` with Leash, intercepts every `tools/call`, and checks policy before forwarding.
+That's it. The proxy registers as `fs-agent` with Leash, intercepts every `tools/call`, and checks policy before forwarding. The Leash server records each authorization decision in the audit log; the proxy does not write a second duplicate audit entry for normal tool calls.
 
 ## Claude Desktop Setup
 
@@ -272,7 +272,7 @@ rules:
 
 ## Auto-Discovery
 
-When the proxy starts, it discovers the tools available on the upstream MCP server and can auto-create a Leash policy for them. Auto-discovered tools are set to **deny**, and the generated policy is scoped to the proxy's own agent. An admin reviews it and grants `allow` rules, because agents can't grant themselves permissions.
+When the proxy starts, it discovers the tools available on the upstream MCP server and can auto-create a Leash policy for them. Auto-discovered tools are set to **deny**, and the generated policy is scoped to the proxy's own agent. With the default `LEASH_POLICY_REQUIRE_ADMIN=true`, non-admin policy names are stored as `<agent_id>/<name>`. An admin reviews the generated deny-only policy and grants `allow` rules, because agents can't grant themselves permissions.
 
 Check what was discovered:
 
@@ -308,7 +308,7 @@ This maps to OWASP ASI02 (Tool Misuse & Exploitation).
 |------|---------|-------------|
 | `--leash-url` | `http://localhost:8000` | Leash server URL |
 | `--agent-name` | `mcp-proxy` | Agent name for registration |
-| `--on-deny` | `error` | What to return on deny: `error` or `empty` |
+| `--on-deny` | `error` | Accepted values: `error` or `empty`. Current proxy behavior returns a JSON-RPC error on denied calls. |
 | `--on-tool-change` | `block` | When a tool definition changes mid-session: `block` further calls or only `warn` |
 | `--no-auto-discover` | (off) | Don't auto-create a policy from discovered tools |
 

@@ -1,0 +1,24 @@
+{
+  "id": "leash-gate",
+  "name": "Leash Gate",
+  "description": "Authorize every OpenClaw tool call with Leash before it runs.",
+  "activation": { "onStartup": true },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "leashUrl": {
+        "type": "string",
+        "description": "Leash server URL (default http://127.0.0.1:8000)"
+      },
+      "identityFile": {
+        "type": "string",
+        "description": "Identity JSON written by `leash agents register` (default ~/.leash/openclaw-agent.json)"
+      },
+      "timeoutMs": {
+        "type": "number",
+        "description": "Per-call timeout before failing closed (default 5000)"
+      }
+    }
+  }
+}

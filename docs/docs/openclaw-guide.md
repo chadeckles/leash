@@ -19,17 +19,21 @@ OpenClaw's built-in `tools.allow` / `tools.deny` config controls which tools *ex
 
 ## How It Works
 
-OpenClaw's tools map directly to Leash action names. When you wrap OpenClaw with Leash, every tool call is checked against your YAML policy before it executes:
+OpenClaw's tool names map directly to Leash action names. The [`leash-gate`](https://github.com/chadeckles/leash/tree/main/integrations/openclaw/leash-gate) plugin registers an OpenClaw `before_tool_call` hook, so every tool call — whether the model chose it in chat or it came in over the gateway's `/tools/invoke` API — is checked against your YAML policy before it executes:
 
 ```
-OpenClaw Agent
-      │
-      ▼
-   Leash (allow/deny + audit log)
-      │
-      ▼
-   Tool executes (exec, read, browser, etc.)
+ OpenClaw agent / gateway
+        │  before_tool_call(toolName, params)
+        ▼
+ leash-gate plugin ── POST /authorize {action: toolName, resource: command|path|url|query}
+        │
+        ▼
+ Leash (allow/deny + signed, hash-chained audit entry)
+        │
+   allow → tool runs          deny → {block: true, blockReason: "🐕 Blocked by Leash …"}
 ```
+
+If Leash is unreachable or returns an error, the plugin **blocks** the call (fail-closed).
 
 ## OpenClaw's Tool Catalog
 
@@ -53,16 +57,20 @@ These are the default tools OpenClaw exposes — each one becomes a Leash action
 ### 1. Install and start Leash
 
 ```bash
-pip install leash
+git clone https://github.com/chadeckles/leash.git && cd leash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
 leash start
 ```
+
+A source install keeps `app/policies/openclaw.yaml` in your checkout so you can edit it (it hot-reloads). `pip install leash` also works, but the bundled policies then live inside site-packages.
 
 Server starts on http://localhost:8000. Open http://localhost:8000/docs for the interactive API reference.
 
 ### 2. Register your OpenClaw agent
 
 ```bash
-leash agents register --name "openclaw-agent"
+leash agents register --name openclaw-agent --vendor openclaw --type assistant
 ```
 
 You'll see output like:
@@ -70,27 +78,26 @@ You'll see output like:
 ```
   ✔ Registered 'openclaw-agent'
   ID:     a1b2c3d4-e5f6-7890-abcd-ef1234567890
-  Type:   —
-  Vendor: —
+  Type:   assistant
+  Vendor: openclaw
 
-  Policies applied: openclaw-policy
-  Effective rules:  ✔ 10 allow   ✘ 12 deny
+  Policies applied: default, openclaw-policy
+  Effective rules:  ✔ 11 allow   ✘ 13 deny
 
   Token saved → ~/.leash/openclaw-agent.json
 ```
 
 The agent ID and token are saved automatically. Leash policies match on the **agent name** (via wildcard patterns like `*openclaw*`), so naming is what matters here.
 
-!!! tip "Optional metadata flags"
-    You can add `--vendor openclaw --type assistant` for fleet management and filtering later, but these don't affect policy matching.
+!!! tip "Metadata flags are optional"
+    `--vendor` and `--type` help with fleet filtering later but don't affect policy matching. Avoid `--type cli`, `admin`, or `ops` — those are admin types and require the admin key.
 
 ### 3. Verify the built-in policy works
 
 Leash ships with an OpenClaw policy at `app/policies/openclaw.yaml`. It matches any agent with "openclaw" or "claw" in the name. Confirm it applied:
 
 ```bash
-leash policy test --action read --agent "openclaw-agent"
-leash policy test --action exec --agent "openclaw-agent"
+leash policy test --agent openclaw-agent -a read -a exec
 ```
 
 You should see `read → allow` and `exec → deny`. That's deny-by-default working.
@@ -103,62 +110,86 @@ The built-in policy defaults:
 !!! warning "Messaging is denied by default"
     The `message` tool (WhatsApp, Telegram, Slack, Discord) is not explicitly listed in the built-in policy, so it falls through to the catch-all deny rule. If your OpenClaw setup relies on messaging, add an explicit allow rule — see [Example Policies](#example-policies) below.
 
-### 4. Integrate with your OpenClaw agent code
+### 4. Install the `leash-gate` plugin (recommended)
 
-#### Option A: Python SDK
+The plugin lives in this repo at `integrations/openclaw/leash-gate/`. It needs OpenClaw installed (`npm install -g openclaw@latest`, Node 24.16+) and onboarded (`openclaw onboard`).
 
-The SDK is included when you `pip install leash`. Wrap your OpenClaw tool functions so every call is authorized, executed, and audit-logged automatically:
+```bash
+openclaw plugins install --link ./integrations/openclaw/leash-gate --force
+openclaw plugins enable leash-gate
+openclaw plugins inspect leash-gate --runtime --json   # confirm the before_tool_call hook is registered
+```
+
+Restart the gateway (`openclaw gateway run`) after enabling. The plugin reads the identity saved in Step 2 (`~/.leash/openclaw-agent.json`) and talks to `http://127.0.0.1:8000` by default. To override, edit `~/.openclaw/openclaw.json`:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "leash-gate": {
+        "enabled": true,
+        "config": {
+          "leashUrl": "http://127.0.0.1:8000",
+          "identityFile": "~/.leash/openclaw-agent.json",
+          "timeoutMs": 5000
+        }
+      }
+    }
+  }
+}
+```
+
+Each decision is logged by the gateway:
+
+```
+🐕 Leash ALLOW read README.md [openclaw-policy/read] — OpenClaw may read files in the workspace
+🐕 Leash DENY  exec whoami [openclaw-policy/exec] — Shell execution is blocked — this is the highest-risk tool
+```
+
+A denied call returns the reason to the model (and to `/tools/invoke` callers as HTTP 403 `tool_call_blocked`), so the assistant can tell the user *why* it couldn't act.
+
+!!! note "Resource mapping"
+    The plugin sends the tool name as the Leash `action` and the first of `command`, `path`, `file_path`, `url`, `query`, or `target` as the `resource`, so `resource:` rules and the audit log show exactly what was attempted (e.g. `exec whoami`).
+
+Want to try it end-to-end in ten minutes? Follow the **[OpenClaw Lab](openclaw-lab.md)**.
+
+### 5. Other integration options
+
+#### REST API (any language)
+
+Call Leash before each tool execution. The agent ID and token come from Step 2:
+
+```bash
+export AGENT_ID=$(jq -r .agent_id ~/.leash/openclaw-agent.json)
+export TOKEN=$(jq -r .token ~/.leash/openclaw-agent.json)
+
+curl -s -X POST http://localhost:8000/authorize \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"agent_id": "'$AGENT_ID'", "action": "exec", "resource": "whoami"}' | jq .decision
+```
+
+If the response is `"allow"`, proceed. If `"deny"`, skip the tool call.
+
+#### Python SDK (custom Python tools)
+
+If you expose your own Python tools to OpenClaw (for example through an MCP server or skill backend), wrap them with the SDK so they are authorized too:
 
 ```python
 from sdk import LeashAgent
 
 agent = LeashAgent("http://localhost:8000", name="openclaw-agent")
 
-@agent.tool("exec")
-def run_command(command: str):
-    """Wraps OpenClaw's exec tool with Leash authorization."""
-    import subprocess
-    return subprocess.run(command, shell=True, capture_output=True, text=True)
-
 @agent.tool("web_fetch")
 def fetch_page(url: str):
-    """Wraps web_fetch with Leash authorization."""
     import httpx
     return httpx.get(url).text
 
-# Use as a context manager — connects on entry, cleans up on exit:
 with agent:
     fetch_page("https://example.com")   # ✔ allowed by policy
-    run_command("ls -la")                # ✘ denied — LeashDenied raised
 ```
 
-The `@agent.tool` decorator handles the full cycle: authorize → execute → audit. If the action is denied, the function **never runs**. If Leash is unreachable, it **denies by default** (fail-closed).
-
-For existing tool functions you don't want to redecorate, use `agent.guard()`:
-
-```python
-guarded = agent.guard([run_command, fetch_page])
-```
-
-See the [SDK Reference](sdk-reference.md) for the full API.
-
-#### Option B: REST API (any language)
-
-Call Leash before each OpenClaw tool execution. The agent ID and token come from Step 2 — they're saved in `~/.leash/openclaw-agent.json`:
-
-```bash
-# Load your agent's credentials:
-export AGENT_ID=$(cat ~/.leash/openclaw-agent.json | jq -r .agent_id)
-export TOKEN=$(cat ~/.leash/openclaw-agent.json | jq -r .token)
-
-# Check permission before running 'exec':
-curl -s -X POST http://localhost:8000/authorize \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"agent_id": "'$AGENT_ID'", "action": "exec"}' | jq .decision
-```
-
-If the response is `"allow"`, proceed. If `"deny"`, skip the tool call.
+Denied calls never run, and an unreachable server denies by default. See the [SDK Reference](sdk-reference.md). For MCP servers, the [MCP Proxy](mcp-proxy-guide.md) does this without code changes.
 
 ## The Scan-First Workflow (Recommended)
 
@@ -359,12 +390,11 @@ rules:
 After setup, use these commands to confirm everything is wired up:
 
 ```bash
-# Check what your agent can do (use agent ID from step 2):
-leash agents permissions <agent-id>
+# Check what your agent can do:
+leash agents permissions openclaw-agent
 
-# Test specific actions without running anything:
-leash policy test --action read --agent "openclaw-agent"
-leash policy test --action exec --agent "openclaw-agent"
+# Test live decisions (these are recorded in the audit log):
+leash policy test --agent openclaw-agent -a read -a exec
 
 # Watch decisions in real time:
 leash dashboard
@@ -374,6 +404,9 @@ leash audit log --agent <agent-id> --limit 20
 
 # Scan for suspicious patterns:
 leash audit scan --agent <agent-id>
+
+# Confirm the hash chain is intact:
+curl -s http://localhost:8000/verify/audit-chain
 ```
 
 ## OpenClaw Tool Groups → Leash Actions

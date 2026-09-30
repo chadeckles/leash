@@ -34,11 +34,8 @@ rules:
   - action: "write"
     effect: deny
     reason: "File writes are blocked — uncomment the allow rule below to enable"
-    # To allow writes, change effect to 'allow' or add an observe rule first:
-    # - action: "write"
-    #   effect: observe
-    #   observe_deny: false
-    #   reason: "Shadow writes before enforcing"
+    # To allow writes, change effect to 'allow'. To shadow first, move the
+    # rule into a separate policy with `mode: observe` (mode is policy-level).
 
   - action: "edit"
     effect: deny

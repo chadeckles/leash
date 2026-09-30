@@ -297,6 +297,8 @@ rules:
     reason: "No shell access"
 ```
 
+Observe mode is policy-level. Individual rules still use only `effect: allow` or `effect: deny`; there is no rule-level `effect: observe`.
+
 **What happens:**
 
 - Leash evaluates the policy normally

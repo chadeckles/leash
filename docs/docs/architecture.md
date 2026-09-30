@@ -5,12 +5,13 @@ How Leash works under the hood.
 ## Design Principles
 
 1. **Deny by default** — if no policy explicitly allows an action, it's denied
-2. **Fail closed** — if the server is unreachable, the SDK blocks the action
+2. **Fail closed** — if the server is unreachable, the SDK, MCP proxy, and OpenClaw plugin block the action; token-revocation DB errors return 503
 3. **Observe before enforce** — shadow new policies in production before they can break anything
 4. **Append-only audit** — every decision is logged with a hash chain, making tampering detectable
 5. **Export everywhere** — audit events flow to JSONL files, webhooks, and SIEM pipelines in real time
 6. **Separation of concerns** — policies, identity, and audit are independent modules
-7. **OWASP ASI alignment** — maps to the Agentic Security Initiative (2025) threat categories
+7. **Least privilege for operators** — policy management and admin identities require the admin key
+8. **OWASP ASI alignment** — maps to the Agentic Security Initiative (2025) threat categories
 
 ## System Overview
 
@@ -18,12 +19,12 @@ How Leash works under the hood.
 ┌─────────────────────────────────────────────────────────────────┐
 │                         Your Agent Code                         │
 │   @agent.tool("email.send")                                     │
-│   def send(to, body): ...                                       │
+│   def send(to, body): ...     (or MCP client / OpenClaw / REST) │
 └───────────────────────────┬─────────────────────────────────────┘
-                            │ SDK / MCP Proxy
+                            │ SDK / MCP Proxy / leash-gate plugin
                             ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Leash Server                           │
+│                        Leash Server                             │
 │                                                                 │
 │  ┌──────────┐    ┌───────────────┐    ┌───────────────────┐    │
 │  │ Identity  │    │ Policy Engine │    │   Audit Service   │    │
@@ -47,7 +48,7 @@ How Leash works under the hood.
 
 ## Request Flow
 
-Here's what happens when your agent calls a `@tool`-decorated function:
+Here's what happens when your agent calls a `@tool`-decorated function (the MCP proxy and the OpenClaw `leash-gate` plugin follow the same flow):
 
 ### 1. SDK Intercept
 
@@ -72,8 +73,9 @@ The server validates the JWT token:
 
 - Token must be signed with the server's RSA key
 - Token must not be expired
-- Issuer must be `leash`
-- The `sub` claim must match the `agent_id`
+- Issuer must be `leash-identity-service`
+- The `tv` (token version) claim must match the agent's current `token_version` in the DB — deleted or rotated agents are rejected, and DB errors fail closed (503)
+- The `sub` claim must match the `agent_id` — an agent can only authorize itself
 
 ### 4. Policy Evaluation
 
@@ -92,7 +94,7 @@ For each policy, the engine checks:
 3. **Resource match** — if the rule specifies a `resource`, does the requested resource match?
 4. **Conditions (ABAC)** — if the rule has `conditions`, do they all pass against the request context?
 5. **Rate limit** — if the rule has a `rate_limit`, has it been exceeded?
-6. **Observe mode** — if the policy has `mode: observe`, log the denial but return `allow` with an `observation` field
+6. **Observe mode** — if the policy has `mode: observe`, a would-be denial returns `allow` with an `observation` field and is audited as `observe_deny`
 
 The **first matching rule wins**. If no rule matches anywhere, the default is **deny**.
 
@@ -104,7 +106,7 @@ Every authorize decision is automatically logged:
 ┌────────────┬──────────────┬────────────┬──────────────┬───────────┐
 │ timestamp  │ agent_id     │ action     │ decision     │ prev_hash │
 ├────────────┼──────────────┼────────────┼──────────────┼───────────┤
-│ 14:22:01   │ a1b2...      │ email.send │ allow        │ 0000...   │
+│ 14:22:01   │ a1b2...      │ email.send │ allow        │ genesis   │
 │ 14:22:03   │ a1b2...      │ file.del   │ deny         │ 8f3a...   │
 │ 14:22:05   │ c3d4...      │ code.read  │ allow        │ 2b7e...   │
 └────────────┴──────────────┴────────────┴──────────────┴───────────┘
@@ -113,6 +115,8 @@ Every authorize decision is automatically logged:
                                     the previous entry's hash
                                     (hash chain = tamper detection)
 ```
+
+When a resource is supplied, the stored `action` is `"<action> <resource>"` (e.g. `exec whoami`). `inputs` holds `{resource, context}` and `outputs` holds `{reason, matched_policy}`. The chain is global across all agents; each link hashes the previous entry's `id`, `agent_id`, `timestamp`, `action`, `policy_decision`, and `signature`.
 
 ### 6. Response
 
@@ -153,7 +157,7 @@ Handles agent registration and authentication.
   "name": "my-agent",
   "type": "coding",
   "tv": 1,
-  "iss": "leash",
+  "iss": "leash-identity-service",
   "iat": 1711627200,
   "exp": 1712232000
 }
@@ -165,7 +169,7 @@ Handles agent registration and authentication.
 | `name` | Agent name (for policy matching) |
 | `type` | Agent type (e.g. `coding`, `cli`, `research`) |
 | `tv` | Token version — checked against DB; bumped on key rotation to revoke old tokens |
-| `iss` | Issuer (`leash`) |
+| `iss` | Issuer (`leash-identity-service`) |
 | `iat` | Issued-at timestamp |
 | `exp` | Expiration (default: 7 days from issuance) |
 
@@ -176,7 +180,7 @@ Evaluates allow/deny decisions against YAML and database policies.
 | Concept | Implementation |
 |---------|---------------|
 | Policy sources | YAML files on disk + managed policies in DB |
-| Merge strategy | DB policies override YAML policies with same name |
+| Merge strategy | YAML + DB combined; on a name collision the DB policy wins. Non-admin policies are namespaced `<agent_id>/<name>`, so they can never shadow a YAML policy |
 | Priority | Higher number = evaluated first |
 | Agent matching | `fnmatch` patterns (`*email*`, `bot-?`) |
 | Action matching | `fnmatch` patterns (`email.*`, `file.read`) |
@@ -222,9 +226,12 @@ Append-only, hash-chained audit trail.
 
 | Pattern | Sequence | Risk |
 |---------|----------|------|
-| `recon-exfil` | list → read → network.send | Data exfiltration |
-| `privesc` | config.read → admin.* | Privilege escalation |
-| `prompt-inject` | prompt.* → code.execute | Injection attack |
+| `data-exfiltration` | `file.read*` → `email.send*` | Data exfiltration |
+| `read-then-upload` | `file.read*` → `web.*` | Data leak |
+| `recon-then-delete` | `*.read*` → `*.delete*` | Destructive recon |
+| `credential-harvest` | `file.read*` → `db.query*` | Credential use |
+| `search-then-send` | `*search*` → `email.send*` | Info gathering + exfil |
+| `read-then-execute` | `*.read*` → `*.execute*` | Code injection |
 
 ### MCP Proxy (`sdk/mcp_proxy.py`)
 
@@ -275,7 +282,8 @@ agents
 ```
 policies
 ├── id            Integer (primary key, auto)
-├── name          String (unique)
+├── name          String (unique; non-admin policies are "<agent_id>/<name>")
+├── description   Text (nullable)
 ├── yaml_content  Text (full YAML body)
 ├── priority      Integer (default: 0)
 ├── active        Boolean (default: true)
@@ -286,14 +294,14 @@ policies
 ### Audit Entry (`app/models/audit.py`)
 
 ```
-audit_entries
+audit_log
 ├── id              Integer (primary key, auto)
-├── agent_id        String (FK → agents.id)
+├── agent_id        String (no FK — entries survive agent deletion)
 ├── timestamp       DateTime
 ├── action          String
 ├── inputs          JSON (nullable)
 ├── outputs         JSON (nullable)
-├── policy_decision String ("allow" or "deny")
+├── policy_decision String ("allow", "deny", or "observe_deny")
 ├── prev_hash       String (SHA-256 of prior entry)
 └── signature       Text (RSA signature)
 ```
@@ -306,8 +314,8 @@ audit_entries
 
 | What | Algorithm | Key Size |
 |------|-----------|----------|
-| JWT signing | RS256 (RSA + SHA-256) | 2048-bit |
-| Audit signatures | RSA-PSS + SHA-256 | 2048-bit (server key) |
+| JWT signing | RS256 (RSA PKCS#1 v1.5 + SHA-256) | 2048-bit |
+| Audit signatures | RSA PKCS#1 v1.5 + SHA-256 | 2048-bit (server key) |
 | Hash chain | SHA-256 | 256-bit |
 
 ### Key Management
@@ -318,6 +326,14 @@ audit_entries
 - **Private key permissions** — `0600` (owner read/write only)
 - **Agent key rotation** — `POST /agents/{id}/rotate` generates new key pair + JWT, bumps `token_version` to revoke old tokens
 - **Token version** — server-side revocation; every JWT carries a `tv` claim checked against the agent's `token_version` column
+
+### Authorization & Admin Controls
+
+- **Admin key** — `LEASH_ADMIN_KEY`, or auto-generated at `KEYS_DIR/admin.key` (0600). Sent as `X-Leash-Admin-Key` to register admin-type agents (`cli`, `admin`, `ops`). The CLI does this automatically to create `cli-admin`.
+- **Policy management** — `/policies/managed` is admin-only when `LEASH_POLICY_REQUIRE_ADMIN=true` (default). With it off, non-admin agents may only create deny-only policies scoped to themselves.
+- **Registration** — open by default; `LEASH_REQUIRE_AUTH_REGISTER=true` requires an admin.
+- **Read endpoints** — metrics, overview, and export are open by default; `LEASH_REQUIRE_AUTH_READ=true` requires a token.
+- **Chain verification** — `/verify/audit-chain` recomputes every hash link. Tampering with an entry breaks the link at the *next* entry, so the most recent entry is only protected once another decision is logged.
 
 ### Path Traversal Protection
 
@@ -356,14 +372,17 @@ Leash maps to the [OWASP Agentic Security Initiative](https://owasp.org/www-proj
 | `POST` | `/agents` | Register a new agent |
 | `GET` | `/agents` | List all agents |
 | `GET` | `/agents/{id}` | Get agent details |
+| `PATCH` | `/agents/{id}` | Update agent metadata |
+| `GET` | `/agents/{id}/stats` | Per-agent decision stats |
 | `DELETE` | `/agents/{id}` | Deregister an agent |
 | `POST` | `/agents/{id}/rotate` | Rotate agent keys |
 | `GET` | `/agents/{id}/permissions` | Effective permissions |
 | `POST` | `/authorize` | Authorize an action |
+| `GET` | `/policies/{agent_id}` | Policies that apply to an agent |
 | `POST` | `/policies/managed` | Create a managed policy |
 | `GET` | `/policies/managed` | List managed policies |
 | `GET` | `/policies/managed/{id}` | Get a managed policy |
-| `PUT` | `/policies/managed/{id}` | Update a managed policy |
+| `PATCH` | `/policies/managed/{id}` | Update a managed policy |
 | `DELETE` | `/policies/managed/{id}` | Delete a managed policy |
 | `POST` | `/policies/dry-run` | Dry-run policy evaluation |
 | `GET` | `/policies/overview` | Policy overview (all sources) |
@@ -375,9 +394,10 @@ Leash maps to the [OWASP Agentic Security Initiative](https://owasp.org/www-proj
 | `POST` | `/scan` | Classify tools + check policy coverage |
 | `POST` | `/scan/generate-policy` | Generate starter YAML policy |
 | `POST` | `/audit` | Manual audit log entry |
+| `POST` | `/verify` | Verify an RSA signature against the server key (unauthenticated) |
 | `GET` | `/verify/audit-chain` | Verify hash chain integrity |
 | `GET` | `/health` | Health check |
 | `GET` | `/metrics` | Prometheus metrics |
 | `GET` | `/dashboard` | Web dashboard |
-| `GET` | `/admin/key-info` | Server key age and rotation status |
+| `GET` | `/admin/key-info` | Server key age and rotation status (admin JWT when `LEASH_REQUIRE_AUTH_READ=true`) |
 | `POST` | `/admin/rotate-server-keys` | Rotate server signing keys (admin only) |

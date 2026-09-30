@@ -22,6 +22,7 @@ nav:
   - Getting Started: getting-started.md
   - Write Your First Policy: write-your-first-policy.md
   - OpenClaw Integration: openclaw-guide.md
+  - OpenClaw Lab: openclaw-lab.md
   - MCP Proxy Guide: mcp-proxy-guide.md
   - SDK Reference: sdk-reference.md
   - CLI Reference: cli-reference.md

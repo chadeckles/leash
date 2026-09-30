@@ -70,7 +70,7 @@ their hooks. The proxy covers apps that have none.
 - `leash mcp run` is a local stdio wrapper around the MCP server command. Nothing is hosted; it uses the same rules, levels and audit log as `leash hook`, and tool calls use the same `mcp.<server>.<tool>` actions.
 - `leash mcp wrap` rewrites Claude Desktop, VS Code and Windsurf configs to go through it, with a backup; `leash setup` offers it and `leash uninstall` reverses it.
 - Tool pinning: descriptions are fingerprinted on first use; changed tools, or tools with hidden instructions, are held back until `leash mcp trust`.
-- `ask` rules prompt through the app (MCP elicitation) where supported; otherwise they're refused with a `leash allow` hint.
+- `ask` rules prompt through the app (MCP elicitation) where supported; otherwise they're refused, and `leash allow --once` lets the retry through.
 - Session taint: after an agent reads web pages, GitHub issues or MCP results, the new `untrusted` group asks before it pushes, posts or sends anything.
 - New `production` group blocks `DROP`/`TRUNCATE`, database resets, `terraform destroy` and cloud delete commands, including through MCP database tools.
 

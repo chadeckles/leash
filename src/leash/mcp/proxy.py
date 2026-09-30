@@ -28,6 +28,7 @@ from typing import IO, Any, Dict, List, Optional
 from leash.hooks.actions import ToolCall
 from leash.hooks.hosts import Verdict
 from leash.mcp import clients
+from leash.mcp import approvals
 from leash.mcp.pins import Pins
 
 APPROVAL_TIMEOUT = 300
@@ -209,9 +210,17 @@ class Proxy:
                              daemon=True).start()
             return None
         if verdict.decision == "ask":
+            once = approvals.key(self.client, self.name, tool, args)
+            if approvals.take(once):
+                runner._audit("mcp", call, verdict, observations, False, started, self.stderr,
+                              agent=self.client, extra={**extra, "approved": True, "approval": once})
+                return self.to_server(msg)
+            extra["approval"] = once
             verdict = Verdict("ask", f"{verdict.reason}. {clients.label(self.client)} can't show Leash's approval "
-                                     f"prompt, so this was blocked. To allow it, run `leash allow` in a terminal "
-                                     f"and try again.", verdict.policy, verdict.rule, verdict.request, verdict.group)
+                                     f"prompt, so this was blocked. To let it run once, run `leash allow --once` "
+                                     f"in a terminal, then ask the AI to try again within "
+                                     f"{approvals.TTL // 60} minutes.",
+                              verdict.policy, verdict.rule, verdict.request, verdict.group)
         runner._audit("mcp", call, verdict, observations, False, started, self.stderr,
                       agent=self.client, extra=extra)
         self._refuse(msg["id"], verdict.reason)

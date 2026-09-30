@@ -1515,6 +1515,8 @@ def main() -> None:
     allow_p.add_argument("which", nargs="?", default="last", help="'last' (default) or N, as shown by `leash explain`")
     allow_p.add_argument("--pattern", help="Allow a glob pattern instead of exactly this resource (e.g. '/Users/me/Desktop/*')")
     allow_p.add_argument("--all-agents", action="store_true", help="Apply to every agent, not just the one that was blocked")
+    allow_p.add_argument("--once", action="store_true",
+                         help="MCP apps without prompts: let this exact call run once, if retried within 10 minutes")
     allow_p.add_argument("--undo", action="store_true", help="Remove the most recent rule added with `leash allow`")
     allow_p.add_argument("--dry-run", action="store_true", help="Show the rule without saving it")
     allow_p.add_argument("--yes", "-y", action="store_true", help="Don't ask for confirmation")

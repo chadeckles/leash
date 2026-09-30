@@ -20,7 +20,9 @@ Leash hooks already see every MCP tool call.
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -50,8 +52,6 @@ _INFO_NAMES = {"claude-ai": "claude-desktop", "claude desktop": "claude-desktop"
 
 
 def client_id_from_info(name: str) -> str:
-    import re
-
     key = (name or "").strip().lower()
     if key in _INFO_NAMES:
         return _INFO_NAMES[key]
@@ -144,22 +144,52 @@ class Change:
     skipped: List[Tuple[str, str]] = field(default_factory=list)
     backup: Optional[Path] = None
     error: str = ""
+    manual: Dict[str, Any] = field(default_factory=dict)  # entries to paste by hand (config has comments)
 
 
-def _load(client: str) -> Tuple[Optional[Dict[str, Any]], str]:
+def _strip_jsonc(text: str) -> str:
+    """Remove // and /* */ comments and trailing commas, leaving strings alone."""
+    out, i, n = [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == '"':
+            j = i + 1
+            while j < n and text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+            out.append(text[i:j + 1])
+            i = j + 1
+        elif text.startswith("//", i):
+            i = text.find("\n", i) if "\n" in text[i:] else n
+        elif text.startswith("/*", i):
+            end = text.find("*/", i + 2)
+            i = n if end < 0 else end + 2
+        else:
+            out.append(c)
+            i += 1
+    return re.sub(r",(\s*[}\]])", r"\1", "".join(out))
+
+
+def _load(client: str) -> Tuple[Optional[Dict[str, Any]], str, bool]:
+    """Return (config, error, has_comments)."""
     from leash.hooks.install import _read
 
     path = config_path(client)
     try:
-        return _read(path), ""
-    except ValueError as exc:
-        return None, f"couldn't read {path} ({exc}); if it has comments, wrap servers by hand (see docs/mcp.md)"
+        return _read(path), "", False
     except OSError as exc:
-        return None, f"couldn't read {path} ({exc})"
+        return None, f"couldn't read {path} ({exc})", False
+    except ValueError as exc:
+        try:
+            doc = json.loads(_strip_jsonc(path.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            doc = None
+        if isinstance(doc, dict):
+            return doc, "", True
+        return None, f"couldn't read {path} ({exc})", False
 
 
 def servers(client: str) -> Tuple[List[Server], str]:
-    doc, err = _load(client)
+    doc, err, _ = _load(client)
     entries = (doc or {}).get(CLIENTS[client].key)
     out = []
     for name, entry in (entries or {}).items() if isinstance(entries, dict) else ():
@@ -175,7 +205,7 @@ def _rewrite(client: str, wrap: bool, only: Optional[List[str]], dry_run: bool) 
 
     path = config_path(client)
     change = Change(client, path)
-    doc, change.error = _load(client)
+    doc, change.error, has_comments = _load(client)
     if doc is None:
         return change
     entries = doc.get(CLIENTS[client].key)
@@ -197,7 +227,10 @@ def _rewrite(client: str, wrap: bool, only: Optional[List[str]], dry_run: bool) 
                 continue
             entries[name] = unwrap_entry(entry)
         change.changed.append(name)
-    if change.changed and not dry_run:
+    if change.changed and has_comments:
+        # Rewriting would drop the user's comments, so show the edit instead.
+        change.manual = {name: entries[name] for name in change.changed}
+    elif change.changed and not dry_run:
         change.backup = _backup(Target(f"mcp-{client}", "user", path, False))
         _write(path, doc)
     return change

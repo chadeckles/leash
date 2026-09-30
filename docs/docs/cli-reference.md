@@ -135,6 +135,7 @@ leash allow 2 --pattern '~/notes/*'       # allow a glob instead, based on the 2
 leash allow --all-agents                  # don't limit the rule to the agent that was flagged
 leash allow --dry-run                     # print the rule only
 leash allow --undo                        # remove the last rule added
+leash allow --once                        # MCP apps without prompts: let the refused call run once (10 min)
 ```
 
 | Flag | Description |

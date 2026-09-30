@@ -587,6 +587,8 @@ def cmd_explain(args: argparse.Namespace) -> None:
     print("\n  What you can do:")
     print("    • Nothing. If an agent shouldn't do this, Leash did its job.")
     which = "" if args.which in ("", "last") else f" {args.which}"
+    if e.get("approval") and not e.get("approved"):
+        print(f"    • Let it run once, then ask the AI to retry:   leash allow{which} --once")
     print(f"    • Always allow exactly this for {label}:   leash allow{which}")
     pattern = _suggest_pattern(action, resource) if base == "ask" else None
     if pattern:
@@ -651,6 +653,26 @@ def _confirm(prompt: str, assume_yes: bool) -> bool:
         return False
 
 
+def _allow_once(e: dict, label: str, args: argparse.Namespace) -> None:
+    from leash.mcp import approvals
+
+    k = e.get("approval")
+    if not k or e.get("approved"):
+        print("  ✘ --once is for MCP calls refused because the app can't show Leash's prompt.\n"
+              "    Coding agents ask you directly; use `leash allow` for a lasting exception.", file=sys.stderr)
+        sys.exit(1)
+    print(f"\n  This lets {label} run {e.get('request')} once, with exactly the same input,")
+    print(f"  if the AI tries again in the next {approvals.TTL // 60} minutes.")
+    if args.dry_run:
+        print("\n  (dry run: nothing written)\n")
+        return
+    if not _confirm("\n  Allow it once? [y/N] ", args.yes):
+        print("  Nothing changed.")
+        return
+    approvals.grant(str(k))
+    print(f"\n  ✔ Approved once. Ask {label} to try again.\n")
+
+
 def cmd_allow(args: argparse.Namespace) -> None:
     from datetime import date
 
@@ -683,6 +705,9 @@ def cmd_allow(args: argparse.Namespace) -> None:
         print(f"  That tool is held back because its description changed or looks suspicious.\n"
               f"  Review it with:  leash mcp trust {e.get('mcp_server')}")
         sys.exit(1)
+    if getattr(args, "once", False):
+        _allow_once(e, label, args)
+        return
     action, resource = _split_request(str(e.get("request", "")))
     if not action:
         print("  ✘ That audit entry has no action to allow.", file=sys.stderr)

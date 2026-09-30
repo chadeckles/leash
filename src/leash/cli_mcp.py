@@ -87,6 +87,11 @@ def _report(change: clients.Change, verb: str, dry_run: bool) -> None:
     if change.error:
         print(f"  ! {label}: {change.error}")
         return
+    if change.manual:
+        print(f"  ! {label}: {change.path} has comments, so Leash won't rewrite it. Replace these entries by hand:")
+        for line in json.dumps(change.manual, indent=2).splitlines()[1:-1]:
+            print(f"      {line}")
+        return
     if change.changed:
         prefix = f"Would {verb.lower()}" if dry_run else verb
         print(f"  ✔ {label}: {prefix} {', '.join(change.changed)} → {change.path}")
@@ -102,7 +107,7 @@ def wrap_clients(names: List[str], only: Optional[List[str]] = None, dry_run: bo
     for name in names:
         change = clients.wrap(name, only, dry_run)
         _report(change, "Wrapped", dry_run)
-        if change.changed:
+        if change.changed and not change.manual:
             changed.append(name)
     return changed
 

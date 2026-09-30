@@ -71,7 +71,7 @@ Config files:
 
 For any other MCP app, edit its config by hand: put `leash mcp run --name <server> --` in front of the server command.
 
-**Not covered:** remote servers (entries with a `url` instead of a `command`) are skipped, because there's no local command to wrap. Config files with comments (JSONC) can't be rewritten safely; `leash mcp wrap` says so and changes nothing.
+**Not covered:** remote servers (entries with a `url` instead of a `command`) are skipped, because there's no local command to wrap. Leash never rewrites a config file that has comments (VS Code allows them), because that would delete them. Instead `leash mcp wrap` prints the wrapped entries for you to paste in; `leash mcp status` still reads the file.
 
 ## What it checks
 
@@ -96,7 +96,14 @@ rules:
 
 When a rule says **ask**, the proxy asks through the app, if the app supports MCP prompts (*elicitation*): you see "Leash: allow … ?" and choose. Your answer is logged. If you don't answer within 5 minutes, the call is refused.
 
-If the app can't show prompts, the call is refused with a message explaining why. Run `leash explain` to see it and `leash allow` to let it through next time.
+Claude Desktop and Windsurf can't show these prompts yet (VS Code can). There, the call is refused and the AI is told why. To let it through:
+
+```bash
+leash allow --once     # this exact call, once, if the AI retries within 10 minutes
+leash allow            # always allow it (adds a rule to my_rules.yaml)
+```
+
+Then ask the AI to try again. `leash explain` shows what was refused and why.
 
 ### Tool descriptions (pinning)
 
@@ -137,7 +144,8 @@ The proxy and hooks check what the agent *asks* to do. They don't sandbox the pr
 
 - **The app doesn't show the server's tools.** Restart the app fully. Check `leash doctor`. Run the wrapped command from the config in a terminal to see errors.
 - **A tool disappeared.** It was hidden because its description changed or looks suspicious. Run `leash mcp status`, then `leash mcp trust <server>`.
-- **"… can't show Leash's approval prompts".** The app doesn't support MCP elicitation. Use `leash explain` and `leash allow`.
+- **"… can't show Leash's approval prompt".** The app doesn't support MCP elicitation. Run `leash allow --once`, then ask the AI to retry.
+- **"has comments, so Leash won't rewrite it".** Paste the entries `leash mcp wrap` printed into the file, or remove the comments and run it again.
 - **Undo everything.** `leash mcp unwrap`, or restore the backup from `~/.leash/backups/`.
 
 ## Server mode (advanced)

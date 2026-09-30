@@ -40,6 +40,7 @@ change meaning.
 | `mcp_client` | string | MCP proxy only: the app, e.g. `claude-desktop`, `vscode` |
 | `mcp_server` | string | MCP proxy only: the server's name in the app's config |
 | `approved` | boolean | MCP proxy only: your answer when Leash asked through the app |
+| `approval` | string | MCP proxy only: fingerprint of a call refused because the app can't prompt; `leash allow --once` uses it |
 | `mcp_withheld` | boolean | MCP proxy only: `true` when a tool was hidden because its description changed or looked suspicious |
 | `prev` | string | SHA-256 of the previous line |
 | `hash` | string | SHA-256 of this record; `leash audit verify` checks the chain |

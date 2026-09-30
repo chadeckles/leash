@@ -38,6 +38,7 @@ class Verdict:
     policy: Optional[str] = None
     rule: Optional[str] = None
     request: str = ""
+    group: Optional[str] = None
 
     def message(self) -> str:
         where = f" [{self.policy}/{self.rule}]" if self.policy else ""

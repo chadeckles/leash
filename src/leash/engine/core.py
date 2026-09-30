@@ -39,6 +39,7 @@ class Rule:
     conditions: Optional[Mapping[str, Any]] = None
     rate_limit: Optional[Tuple[int, float]] = None
     owasp: Optional[List[str]] = None
+    group: Optional[str] = None
 
     def matches(self, action: str, resource: str, context: Optional[Mapping[str, Any]]) -> bool:
         if not match_pattern(self.action, action):
@@ -71,6 +72,7 @@ class Decision:
     matched_rule: Optional[str] = None
     owasp: Optional[List[str]] = None
     observation: Optional[str] = None
+    group: Optional[str] = None
 
     @property
     def allowed(self) -> bool:
@@ -110,6 +112,7 @@ def compile_policy(doc: Mapping[str, Any], source: str = "") -> Policy:
             conditions=raw.get("conditions") or None,
             rate_limit=_rate_limit(raw.get("rate_limit")),
             owasp=raw.get("owasp") or doc.get("owasp"),
+            group=raw.get("group") or None,
         ))
     return Policy(
         name=name,
@@ -138,6 +141,7 @@ def evaluate_policies(
     rate_limiter: Optional[RateLimiter] = None,
     dry_run: bool = False,
     normalize: bool = True,
+    skip_groups: Iterable[str] = (),
 ) -> Decision:
     """Evaluate *policies* (already sorted by priority, highest first).
 
@@ -145,12 +149,17 @@ def evaluate_policies(
     policies instead of converting denials into allows.  ``normalize=False``
     matches *resource* verbatim (for shell commands and URLs, which are not
     filesystem paths); callers are then responsible for canonicalizing paths.
+    Rules whose ``group`` is in *skip_groups* are ignored (switched off in
+    ``leash settings``).
     """
+    skip = frozenset(skip_groups)
     safe_resource = normalize_resource(resource) if normalize else (resource or "")
     for policy in policies:
         if not policy.applies_to(agent_id, agent_name):
             continue
         for rule in policy.rules:
+            if skip and rule.group in skip:
+                continue
             if not rule.matches(action, safe_resource, context):
                 continue
 
@@ -179,7 +188,7 @@ def evaluate_policies(
                 decision = "allow"
                 reason = f"Allowed (observe mode) — {reason}"
 
-            return Decision(decision, reason, policy.name, rule.action, owasp, observation)
+            return Decision(decision, reason, policy.name, rule.action, owasp, observation, rule.group)
 
     return Decision("deny", DEFAULT_DENY_REASON)
 
@@ -224,9 +233,10 @@ class PolicyEngine:
         agent_name: str = "",
         dry_run: bool = False,
         normalize: bool = True,
+        skip_groups: Iterable[str] = (),
     ) -> Decision:
         return evaluate_policies(
             self.policies, agent_id, action, resource, context,
             agent_name=agent_name, rate_limiter=self.rate_limiter, dry_run=dry_run,
-            normalize=normalize,
+            normalize=normalize, skip_groups=skip_groups,
         )

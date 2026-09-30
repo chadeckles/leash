@@ -28,7 +28,7 @@ _VALID_MODES = {"enforce", "observe"}
 _VALID_TOP_KEYS = {"name", "description", "priority", "agents", "rules", "owasp", "mode"}
 _VALID_RULE_KEYS = {
     "action", "effect", "reason", "resource", "conditions",
-    "rate_limit", "owasp",
+    "rate_limit", "owasp", "group",
 }
 _VALID_RATE_LIMIT_KEYS = {"max_calls", "window"}
 
@@ -145,6 +145,9 @@ def validate_policy(doc: Dict[str, Any], source: str = "<inline>") -> List[str]:
             # Optional: resource
             if "resource" in rule and not isinstance(rule["resource"], str):
                 errors.append(f"{prefix}: 'resource' must be a string")
+
+            if "group" in rule and (not isinstance(rule["group"], str) or not rule["group"].strip()):
+                errors.append(f"{prefix}: 'group' must be a non-empty string")
 
             # Optional: conditions
             if "conditions" in rule:

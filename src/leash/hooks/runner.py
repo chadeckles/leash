@@ -16,7 +16,7 @@ import json
 import os
 import sys
 import time
-from typing import Any, Dict, List, Mapping, Optional, Sequence, TextIO
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, TextIO
 
 from leash.hooks import hosts
 from leash.hooks.actions import ActionRequest, ToolCall, requests_for
@@ -46,10 +46,17 @@ def evaluate_call(
     *,
     agent: Optional[str] = None,
     rate_limiter: Any = None,
+    skip_groups: Optional[Iterable[str]] = None,
 ) -> tuple[Verdict, List[Dict[str, Any]]]:
-    """Evaluate every request for *call*; the strictest decision wins."""
+    """Evaluate every request for *call*; the strictest decision wins.
+
+    *skip_groups* defaults to the groups switched off in ``leash settings``."""
     from leash.engine import DEFAULT_DENY_REASON, evaluate_policies
 
+    if skip_groups is None:
+        from leash import settings
+
+        skip_groups = settings.disabled_groups()
     agent = agent or agent_name_for(call.host)
     limiter = _OncePerCall(rate_limiter) if rate_limiter is not None else None
     verdict: Optional[Verdict] = None
@@ -57,14 +64,14 @@ def evaluate_call(
     for req in requests_for(call):
         d = evaluate_policies(
             policies, agent, req.action, req.resource, req.context,
-            agent_name=agent, rate_limiter=limiter, normalize=False,
+            agent_name=agent, rate_limiter=limiter, normalize=False, skip_groups=skip_groups,
         )
         if d.observation:
             observations.append({"request": req.describe(), "observation": d.observation})
         reason = d.reason
         if d.decision != "allow" and (d.reason == DEFAULT_DENY_REASON or d.matched_policy == "default"):
             reason = f"no Leash policy allows {req.action} for agent '{agent}' — {NO_POLICY_HINT}"
-        candidate = Verdict(d.decision, reason, d.matched_policy, d.matched_rule, req.describe())
+        candidate = Verdict(d.decision, reason, d.matched_policy, d.matched_rule, req.describe(), d.group)
         if verdict is None or _RANK.get(candidate.decision, 2) > _RANK.get(verdict.decision, 2):
             verdict = candidate
         if verdict.decision == "deny":
@@ -163,6 +170,8 @@ def _audit(host: str, call: ToolCall, verdict: Verdict, observations, observe: b
         "rule": verdict.rule,
         "ms": round((time.perf_counter() - started) * 1000, 1),
     }
+    if verdict.group:
+        record["group"] = verdict.group
     if verdict.request and summary != verdict.request[:2000]:
         record["call"] = summary
     if observations:

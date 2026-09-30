@@ -1121,6 +1121,17 @@ def cmd_doctor(args: argparse.Namespace) -> None:
                        f"No policy matches agent '{host}', so every tool call is denied — "
                        "run 'leash init --preset coding-agent'", "high")
 
+    from leash import settings as leash_settings
+
+    prefs = leash_settings.load()
+    if prefs.problem:
+        _check("protection", "warn", f"Settings unreadable ({prefs.problem}); every protection is on until "
+               "you fix it with 'leash settings'", "medium")
+    elif hooked:
+        off = [g.title.lower() for g in leash_settings.GROUPS if g.id in prefs.disabled]
+        _check("protection", "pass", f"Protection level: {prefs.label}"
+               + (f" (off: {', '.join(off)})" if off else " (all protections on)"))
+
     ok, count, problem = auditlog.verify()
     if ok:
         _check("local_audit", "pass" if count else "info",
@@ -1467,6 +1478,18 @@ def main() -> None:
     explain_p.add_argument("which", nargs="?", default="last",
                            help="'last' (default) or N for the Nth most recent")
 
+    setup_p = sub.add_parser("setup", help="Set up Leash: find your agents, pick a protection level, hook them in")
+    setup_p.add_argument("hosts", nargs="*", type=agent_name, metavar="AGENT",
+                         help="Agents to set up (default: every detected agent)")
+    setup_p.add_argument("--level", choices=("strict", "balanced", "relaxed"),
+                         help="Protection level (default: ask, or keep the current one)")
+    setup_p.add_argument("--yes", "-y", action="store_true", help="Don't ask questions; use defaults")
+
+    settings_p = sub.add_parser("settings", help="Turn Leash protections on or off (interactive checklist)")
+    settings_p.add_argument("--level", choices=("strict", "balanced", "relaxed"), help="Switch to a protection level")
+    settings_p.add_argument("--show", action="store_true", help="Print the current settings and exit")
+    settings_p.add_argument("--json", dest="json_out", action="store_true", help="Print the current settings as JSON")
+
     allow_p = sub.add_parser("allow", help="Allow a tool call Leash blocked or asked about (adds a rule to my_rules.yaml)")
     allow_p.add_argument("which", nargs="?", default="last", help="'last' (default) or N, as shown by `leash explain`")
     allow_p.add_argument("--pattern", help="Allow a glob pattern instead of exactly this resource (e.g. '/Users/me/Desktop/*')")
@@ -1535,7 +1558,10 @@ def main() -> None:
     audit_sub = audit_parser.add_subparsers(dest="audit_command", required=True)
 
     # audit summary
-    audit_sub.add_parser("summary", help="Show audit summary stats")
+    asum = audit_sub.add_parser("summary", help="Plain-English summary of what your agents did (local log)")
+    asum.add_argument("--since", help="Period to cover: 30m, 24h (default), 7d, or a date")
+    asum.add_argument("--json", dest="json_out", action="store_true", help="Output JSON")
+    asum.add_argument("--server", action="store_true", help="Summarize the Leash server's audit log instead")
 
     # audit log
     alog = audit_sub.add_parser("log", help="Show audit log entries")
@@ -1620,6 +1646,12 @@ def main() -> None:
         cli_local.cmd_explain(args)
     elif args.command == "allow":
         cli_local.cmd_allow(args)
+    elif args.command == "setup":
+        cli_local.cmd_setup(args)
+    elif args.command == "settings":
+        cli_local.cmd_settings(args)
+    elif args.command == "audit" and args.audit_command == "summary" and not args.server:
+        cli_local.cmd_audit_summary_local(args)
     elif args.command == "init":
         if args.preset or args.list_presets:
             cli_local.cmd_init_preset(args)

@@ -16,11 +16,11 @@ If you want guardrails for Claude Code, Copilot CLI, Cursor, Codex or OpenClaw, 
 
 ```bash
 uv tool install leash
-leash install          # then restart your agent
+leash setup            # then restart your agent
 leash doctor
 ```
 
-See [Coding Agents (Hooks)](hooks.md) and the [OpenClaw guide](openclaw-guide.md). The options below set up the server for the Python SDK, REST API and dashboard.
+See [Coding Agents (Hooks)](hooks.md) and the [OpenClaw guide](openclaw-guide.md). The options below set up the server for the Python SDK, REST API and dashboards. Hooked agents don't need it; to monitor them, see [Logs & SIEM](logs-and-siem.md).
 
 ## Option 1: Install the server + CLI (Recommended)
 

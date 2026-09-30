@@ -6,7 +6,11 @@
 # actions are blocked; risky-but-legitimate actions ask you first.
 #
 # Rules are checked top to bottom and the first match wins, so put
-# exceptions above the rules they override.  Test changes with:
+# exceptions above the rules they override.
+#
+# `group:` ties a rule to a switch in `leash settings` (tamper, secrets,
+# destructive, network, risky, outside_workspace).  Switching a group off
+# skips its rules; rules without a group are always checked.  Test changes with:
 #
 #   leash policy test --local --agent claude-code -a shell.exec -r "git push --force"
 #
@@ -35,76 +39,103 @@ rules:
   - action: "file.[wd]*"
     resource: "*/.leash/*"
     effect: deny
+    group: tamper
     reason: "Agents may not modify Leash policies, keys or audit logs"
     owasp: ["ASI03"]
   - action: "file.[wd]*"
     resource: "*/.claude/settings*.json"
     effect: deny
+    group: tamper
     reason: "Agents may not edit their own hook/permission settings"
     owasp: ["ASI03"]
   - action: "file.[wd]*"
     resource: "*/.copilot/hooks/*"
     effect: deny
+    group: tamper
     reason: "Agents may not edit their own hooks"
     owasp: ["ASI03"]
   - action: "file.[wd]*"
     resource: "*/.copilot/settings*.json"
     effect: deny
+    group: tamper
     reason: "Agents may not edit their own hook/permission settings"
     owasp: ["ASI03"]
   - action: "file.[wd]*"
     resource: "*/.cursor/hooks.json"
     effect: deny
+    group: tamper
     reason: "Agents may not edit their own hooks"
     owasp: ["ASI03"]
   - action: "file.[wd]*"
     resource: "*/.codex/hooks.json"
     effect: deny
+    group: tamper
     reason: "Agents may not edit their own hooks"
     owasp: ["ASI03"]
   - action: "file.[wd]*"
     resource: "*/.codex/config.toml"
     effect: deny
+    group: tamper
     reason: "Agents may not edit their own hook/permission settings"
     owasp: ["ASI03"]
   - action: "file.[wd]*"
     resource: "*/.github/hooks/*"
     effect: ask
+    group: tamper
     reason: "Changing repository agent hooks needs your approval"
     owasp: ["ASI03"]
   - action: "shell.exec"
     resource: "*leash uninstall*"
     effect: deny
+    group: tamper
     reason: "Agents may not remove Leash"
+    owasp: ["ASI03"]
+  - action: "shell.exec"
+    resource: "*leash settings*"
+    effect: deny
+    group: tamper
+    reason: "Agents may not change Leash's protection settings; run `leash settings` yourself in a terminal"
+    owasp: ["ASI03"]
+  - action: "shell.exec"
+    resource: "*leash setup*"
+    effect: deny
+    group: tamper
+    reason: "Agents may not re-run Leash setup; run `leash setup` yourself in a terminal"
     owasp: ["ASI03"]
   - action: "shell.exec"
     resource: "*leash allow*"
     effect: deny
+    group: tamper
     reason: "Agents may not approve their own Leash exceptions; run `leash allow` yourself in a terminal"
     owasp: ["ASI03"]
   - action: "shell.exec"
     resource: "*.leash/*"
     effect: ask
+    group: tamper
     reason: "Shell access to ~/.leash needs your approval"
     owasp: ["ASI03"]
   - action: "shell.exec"
     resource: "*.claude/settings*"
     effect: ask
+    group: tamper
     reason: "Shell access to agent settings needs your approval"
     owasp: ["ASI03"]
   - action: "shell.exec"
     resource: "*.copilot/hooks*"
     effect: ask
+    group: tamper
     reason: "Shell access to agent hooks needs your approval"
     owasp: ["ASI03"]
   - action: "shell.exec"
     resource: "*.cursor/hooks.json*"
     effect: ask
+    group: tamper
     reason: "Shell access to agent hooks needs your approval"
     owasp: ["ASI03"]
   - action: "shell.exec"
     resource: "*.codex/hooks.json*"
     effect: ask
+    group: tamper
     reason: "Shell access to agent hooks needs your approval"
     owasp: ["ASI03"]
 
@@ -112,81 +143,97 @@ rules:
   - action: "file.*"
     resource: "*/.ssh/*"
     effect: deny
+    group: secrets
     reason: "SSH keys are off-limits to agents"
     owasp: ["LLM02", "ASI03"]
   - action: "file.*"
     resource: "*/.aws/credentials"
     effect: deny
+    group: secrets
     reason: "Cloud credentials are off-limits to agents"
     owasp: ["LLM02", "ASI03"]
   - action: "file.*"
     resource: "*/.config/gcloud/*"
     effect: deny
+    group: secrets
     reason: "Cloud credentials are off-limits to agents"
     owasp: ["LLM02", "ASI03"]
   - action: "file.*"
     resource: "*/.azure/*"
     effect: deny
+    group: secrets
     reason: "Cloud credentials are off-limits to agents"
     owasp: ["LLM02", "ASI03"]
   - action: "file.*"
     resource: "*/.kube/config"
     effect: deny
+    group: secrets
     reason: "Cluster credentials are off-limits to agents"
     owasp: ["LLM02", "ASI03"]
   - action: "file.*"
     resource: "*/.docker/config.json"
     effect: deny
+    group: secrets
     reason: "Registry credentials are off-limits to agents"
     owasp: ["LLM02", "ASI03"]
   - action: "file.*"
     resource: "*/.git-credentials"
     effect: deny
+    group: secrets
     reason: "Git credentials are off-limits to agents"
     owasp: ["LLM02", "ASI03"]
   - action: "file.*"
     resource: "*/.config/gh/hosts.yml"
     effect: deny
+    group: secrets
     reason: "GitHub CLI tokens are off-limits to agents"
     owasp: ["LLM02", "ASI03"]
   - action: "file.*"
     resource: "*/.netrc"
     effect: deny
+    group: secrets
     reason: "Credentials are off-limits to agents"
     owasp: ["LLM02", "ASI03"]
   - action: "file.*"
     resource: "*/.pypirc"
     effect: deny
+    group: secrets
     reason: "Package registry tokens are off-limits to agents"
     owasp: ["LLM02", "ASI03"]
   - action: "file.*"
     resource: "*/.npmrc"
     effect: ask
+    group: secrets
     reason: ".npmrc can contain registry tokens"
     owasp: ["LLM02"]
   - action: "file.*"
     resource: "*/.env"
     effect: ask
+    group: secrets
     reason: ".env files usually contain secrets"
     owasp: ["LLM02"]
   - action: "file.*"
     resource: "*/.env.*"
     effect: ask
+    group: secrets
     reason: ".env files usually contain secrets"
     owasp: ["LLM02"]
   - action: "shell.exec"
     resource: "*.ssh/id_*"
     effect: deny
+    group: secrets
     reason: "SSH private keys are off-limits to agents"
     owasp: ["LLM02", "ASI03"]
   - action: "shell.exec"
     resource: "*.ssh/*"
     effect: ask
+    group: secrets
     reason: "Shell access to ~/.ssh needs your approval"
     owasp: ["LLM02", "ASI03"]
   - action: "shell.exec"
     resource: "*.aws/credentials*"
     effect: deny
+    group: secrets
     reason: "Cloud credentials are off-limits to agents"
     owasp: ["LLM02", "ASI03"]
 
@@ -194,168 +241,352 @@ rules:
   - action: "shell.exec"
     resource: "rm -[rRf]* /"
     effect: deny
+    group: destructive
     reason: "Recursive delete of the filesystem root"
     owasp: ["ASI02"]
   - action: "shell.exec"
     resource: "rm -[rRf]* /[*]"
     effect: deny
+    group: destructive
     reason: "Recursive delete of the filesystem root"
     owasp: ["ASI02"]
   - action: "shell.exec"
     resource: "rm -[rRf]* ~*"
     effect: deny
+    group: destructive
     reason: "Recursive delete of the home directory"
     owasp: ["ASI02"]
   - action: "shell.exec"
     resource: "rm -[rRf]* $HOME*"
     effect: deny
+    group: destructive
     reason: "Recursive delete of the home directory"
     owasp: ["ASI02"]
   - action: "shell.exec"
     resource: "mkfs*"
     effect: deny
+    group: destructive
     reason: "Formatting disks is never an agent task"
     owasp: ["ASI02"]
   - action: "shell.exec"
     resource: "dd *of=/dev/*"
     effect: deny
+    group: destructive
     reason: "Raw writes to devices are never an agent task"
     owasp: ["ASI02"]
   - action: "shell.exec"
     resource: ":(){*"
     effect: deny
+    group: destructive
     reason: "Fork bomb"
     owasp: ["ASI02"]
   - action: "shell.exec"
     resource: "*curl *|*sh"
     effect: deny
+    group: destructive
     reason: "Piping a download into a shell runs unreviewed code"
     owasp: ["ASI02", "LLM05"]
   - action: "shell.exec"
     resource: "*curl *|*sh -*"
     effect: deny
+    group: destructive
     reason: "Piping a download into a shell runs unreviewed code"
     owasp: ["ASI02", "LLM05"]
   - action: "shell.exec"
     resource: "*wget *|*sh"
     effect: deny
+    group: destructive
     reason: "Piping a download into a shell runs unreviewed code"
     owasp: ["ASI02", "LLM05"]
   - action: "shell.exec"
     resource: "*wget *|*sh -*"
     effect: deny
+    group: destructive
     reason: "Piping a download into a shell runs unreviewed code"
     owasp: ["ASI02", "LLM05"]
+
+  # ── Network and installs: ask before downloading (on in Strict) ──
+  - action: "web.fetch"
+    effect: ask
+    group: network
+    reason: "Downloading from the web needs your approval (Strict mode)"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "curl *"
+    effect: ask
+    group: network
+    reason: "Downloading or installing software needs your approval (Strict mode)"
+    owasp: ["ASI02", "LLM03"]
+  - action: "shell.exec"
+    resource: "wget *"
+    effect: ask
+    group: network
+    reason: "Downloading or installing software needs your approval (Strict mode)"
+    owasp: ["ASI02", "LLM03"]
+  - action: "shell.exec"
+    resource: "git clone*"
+    effect: ask
+    group: network
+    reason: "Downloading or installing software needs your approval (Strict mode)"
+    owasp: ["ASI02", "LLM03"]
+  - action: "shell.exec"
+    resource: "npm install*"
+    effect: ask
+    group: network
+    reason: "Downloading or installing software needs your approval (Strict mode)"
+    owasp: ["ASI02", "LLM03"]
+  - action: "shell.exec"
+    resource: "npm i *"
+    effect: ask
+    group: network
+    reason: "Downloading or installing software needs your approval (Strict mode)"
+    owasp: ["ASI02", "LLM03"]
+  - action: "shell.exec"
+    resource: "npm add*"
+    effect: ask
+    group: network
+    reason: "Downloading or installing software needs your approval (Strict mode)"
+    owasp: ["ASI02", "LLM03"]
+  - action: "shell.exec"
+    resource: "npx *"
+    effect: ask
+    group: network
+    reason: "Downloading or installing software needs your approval (Strict mode)"
+    owasp: ["ASI02", "LLM03"]
+  - action: "shell.exec"
+    resource: "pnpm add*"
+    effect: ask
+    group: network
+    reason: "Downloading or installing software needs your approval (Strict mode)"
+    owasp: ["ASI02", "LLM03"]
+  - action: "shell.exec"
+    resource: "pnpm install*"
+    effect: ask
+    group: network
+    reason: "Downloading or installing software needs your approval (Strict mode)"
+    owasp: ["ASI02", "LLM03"]
+  - action: "shell.exec"
+    resource: "pnpm dlx*"
+    effect: ask
+    group: network
+    reason: "Downloading or installing software needs your approval (Strict mode)"
+    owasp: ["ASI02", "LLM03"]
+  - action: "shell.exec"
+    resource: "yarn add*"
+    effect: ask
+    group: network
+    reason: "Downloading or installing software needs your approval (Strict mode)"
+    owasp: ["ASI02", "LLM03"]
+  - action: "shell.exec"
+    resource: "pip install*"
+    effect: ask
+    group: network
+    reason: "Downloading or installing software needs your approval (Strict mode)"
+    owasp: ["ASI02", "LLM03"]
+  - action: "shell.exec"
+    resource: "pip3 install*"
+    effect: ask
+    group: network
+    reason: "Downloading or installing software needs your approval (Strict mode)"
+    owasp: ["ASI02", "LLM03"]
+  - action: "shell.exec"
+    resource: "python -m pip install*"
+    effect: ask
+    group: network
+    reason: "Downloading or installing software needs your approval (Strict mode)"
+    owasp: ["ASI02", "LLM03"]
+  - action: "shell.exec"
+    resource: "python3 -m pip install*"
+    effect: ask
+    group: network
+    reason: "Downloading or installing software needs your approval (Strict mode)"
+    owasp: ["ASI02", "LLM03"]
+  - action: "shell.exec"
+    resource: "uv add*"
+    effect: ask
+    group: network
+    reason: "Downloading or installing software needs your approval (Strict mode)"
+    owasp: ["ASI02", "LLM03"]
+  - action: "shell.exec"
+    resource: "uv pip install*"
+    effect: ask
+    group: network
+    reason: "Downloading or installing software needs your approval (Strict mode)"
+    owasp: ["ASI02", "LLM03"]
+  - action: "shell.exec"
+    resource: "uvx *"
+    effect: ask
+    group: network
+    reason: "Downloading or installing software needs your approval (Strict mode)"
+    owasp: ["ASI02", "LLM03"]
+  - action: "shell.exec"
+    resource: "pipx install*"
+    effect: ask
+    group: network
+    reason: "Downloading or installing software needs your approval (Strict mode)"
+    owasp: ["ASI02", "LLM03"]
+  - action: "shell.exec"
+    resource: "brew install*"
+    effect: ask
+    group: network
+    reason: "Downloading or installing software needs your approval (Strict mode)"
+    owasp: ["ASI02", "LLM03"]
+  - action: "shell.exec"
+    resource: "cargo install*"
+    effect: ask
+    group: network
+    reason: "Downloading or installing software needs your approval (Strict mode)"
+    owasp: ["ASI02", "LLM03"]
+  - action: "shell.exec"
+    resource: "gem install*"
+    effect: ask
+    group: network
+    reason: "Downloading or installing software needs your approval (Strict mode)"
+    owasp: ["ASI02", "LLM03"]
+  - action: "shell.exec"
+    resource: "go install*"
+    effect: ask
+    group: network
+    reason: "Downloading or installing software needs your approval (Strict mode)"
+    owasp: ["ASI02", "LLM03"]
+  - action: "shell.exec"
+    resource: "go get*"
+    effect: ask
+    group: network
+    reason: "Downloading or installing software needs your approval (Strict mode)"
+    owasp: ["ASI02", "LLM03"]
 
   # ── Risky but sometimes legitimate: ask first ──
   - action: "shell.exec"
     resource: "sudo *"
     effect: ask
+    group: risky
     reason: "Commands run as root need your approval"
     owasp: ["ASI03"]
   - action: "shell.exec"
     resource: "git push*--force*"
     effect: ask
+    group: risky
     reason: "Force-pushing rewrites shared history"
     owasp: ["ASI02"]
   - action: "shell.exec"
     resource: "git push* -f*"
     effect: ask
+    group: risky
     reason: "Force-pushing rewrites shared history"
     owasp: ["ASI02"]
   - action: "shell.exec"
     resource: "git push*+*"
     effect: ask
+    group: risky
     reason: "Force-pushing rewrites shared history"
     owasp: ["ASI02"]
   - action: "shell.exec"
     resource: "git reset --hard*"
     effect: ask
+    group: risky
     reason: "Discards uncommitted work"
     owasp: ["ASI02"]
   - action: "shell.exec"
     resource: "git clean -*f*"
     effect: ask
+    group: risky
     reason: "Deletes untracked files"
     owasp: ["ASI02"]
   - action: "shell.exec"
     resource: "git branch -D*"
     effect: ask
+    group: risky
     reason: "Deletes a branch without merge checks"
     owasp: ["ASI02"]
   - action: "shell.exec"
     resource: "npm publish*"
     effect: ask
+    group: risky
     reason: "Publishing a package needs your approval"
     owasp: ["ASI02"]
   - action: "shell.exec"
     resource: "pnpm publish*"
     effect: ask
+    group: risky
     reason: "Publishing a package needs your approval"
     owasp: ["ASI02"]
   - action: "shell.exec"
     resource: "yarn publish*"
     effect: ask
+    group: risky
     reason: "Publishing a package needs your approval"
     owasp: ["ASI02"]
   - action: "shell.exec"
     resource: "yarn npm publish*"
     effect: ask
+    group: risky
     reason: "Publishing a package needs your approval"
     owasp: ["ASI02"]
   - action: "shell.exec"
     resource: "cargo publish*"
     effect: ask
+    group: risky
     reason: "Publishing a package needs your approval"
     owasp: ["ASI02"]
   - action: "shell.exec"
     resource: "poetry publish*"
     effect: ask
+    group: risky
     reason: "Publishing a package needs your approval"
     owasp: ["ASI02"]
   - action: "shell.exec"
     resource: "uv publish*"
     effect: ask
+    group: risky
     reason: "Publishing a package needs your approval"
     owasp: ["ASI02"]
   - action: "shell.exec"
     resource: "gem push*"
     effect: ask
+    group: risky
     reason: "Publishing a package needs your approval"
     owasp: ["ASI02"]
   - action: "shell.exec"
     resource: "twine upload*"
     effect: ask
+    group: risky
     reason: "Publishing a package needs your approval"
     owasp: ["ASI02"]
   - action: "shell.exec"
     resource: "gh release create*"
     effect: ask
+    group: risky
     reason: "Creating a release needs your approval"
     owasp: ["ASI02"]
   - action: "shell.exec"
     resource: "gh repo delete*"
     effect: deny
+    group: destructive
     reason: "Deleting repositories is never an agent task"
     owasp: ["ASI02"]
   - action: "shell.exec"
     resource: "docker push*"
     effect: ask
+    group: risky
     reason: "Pushing images needs your approval"
     owasp: ["ASI02"]
   - action: "shell.exec"
     resource: "kubectl delete*"
     effect: ask
+    group: risky
     reason: "Deleting cluster resources needs your approval"
     owasp: ["ASI02"]
   - action: "shell.exec"
     resource: "terraform apply*"
     effect: ask
+    group: risky
     reason: "Changing infrastructure needs your approval"
     owasp: ["ASI02"]
   - action: "shell.exec"
     resource: "terraform destroy*"
     effect: ask
+    group: risky
     reason: "Destroying infrastructure needs your approval"
     owasp: ["ASI02"]
 
@@ -363,39 +594,48 @@ rules:
   - action: "file.*"
     resource: "/tmp/*"
     effect: allow
+    group: outside_workspace
     reason: "Temporary files"
   - action: "file.*"
     resource: "/private/tmp/*"
     effect: allow
+    group: outside_workspace
     reason: "Temporary files"
   - action: "file.*"
     resource: "/private/var/folders/*"
     effect: allow
+    group: outside_workspace
     reason: "Temporary files (macOS)"
   - action: "file.*"
     resource: "*/.claude/*"
     effect: allow
+    group: outside_workspace
     reason: "Agent's own state directory"
   - action: "file.*"
     resource: "*/.copilot/*"
     effect: allow
+    group: outside_workspace
     reason: "Agent's own state directory"
   - action: "file.*"
     resource: "*/.cursor/*"
     effect: allow
+    group: outside_workspace
     reason: "Agent's own state directory"
   - action: "file.*"
     resource: "*/.codex/*"
     effect: allow
+    group: outside_workspace
     reason: "Agent's own state directory"
   - action: "file.write"
     effect: ask
+    group: outside_workspace
     reason: "Writing outside the current workspace needs your approval"
     conditions:
       in_workspace: false
     owasp: ["ASI02"]
   - action: "file.delete"
     effect: ask
+    group: outside_workspace
     reason: "Deleting outside the current workspace needs your approval"
     conditions:
       in_workspace: false

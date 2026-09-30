@@ -31,30 +31,36 @@ rules:
   - action: "file.[wd]*"
     resource: "*/.openclaw*/openclaw.json*"
     effect: deny
+    group: tamper
     reason: "The assistant may not edit OpenClaw's config (it controls plugins, including Leash)"
     owasp: ["ASI03"]
   - action: "file.[wd]*"
     resource: "*/.openclaw*/extensions/*"
     effect: deny
+    group: tamper
     reason: "The assistant may not change installed OpenClaw plugins"
     owasp: ["ASI03"]
   - action: "shell.exec"
     resource: "*openclaw plugins*"
     effect: ask
+    group: tamper
     reason: "Changing OpenClaw plugins needs your approval"
     owasp: ["ASI03"]
   - action: "shell.exec"
     resource: "*openclaw config*"
     effect: ask
+    group: tamper
     reason: "Changing OpenClaw's config needs your approval"
     owasp: ["ASI03"]
   - action: "shell.exec"
     resource: "*.openclaw*/openclaw.json*"
     effect: ask
+    group: tamper
     reason: "Shell access to OpenClaw's config needs your approval"
     owasp: ["ASI03"]
   - action: "tool.gateway"
     effect: ask
+    group: tamper
     reason: "The gateway tool can change OpenClaw's config, restart or update it"
     owasp: ["ASI03"]
 
@@ -62,26 +68,31 @@ rules:
   - action: "file.*"
     resource: "*/.openclaw*/credentials/*"
     effect: deny
+    group: secrets
     reason: "OpenClaw's channel credentials are off-limits"
     owasp: ["LLM02", "ASI03"]
   - action: "shell.exec"
     resource: "*.openclaw*/credentials*"
     effect: deny
+    group: secrets
     reason: "OpenClaw's channel credentials are off-limits"
     owasp: ["LLM02", "ASI03"]
   - action: "file.read"
     resource: "*/.openclaw*/openclaw.json*"
     effect: ask
+    group: secrets
     reason: "OpenClaw's config can contain API keys"
     owasp: ["LLM02"]
 
   # ── Things a personal assistant does on its own: ask first ──
   - action: "tool.nodes"
     effect: ask
+    group: risky
     reason: "Controlling paired devices (camera, screen, location, commands) needs your approval"
     owasp: ["ASI02"]
   - action: "tool.cron"
     effect: ask
+    group: risky
     reason: "Scheduling jobs that run later without you needs your approval"
     owasp: ["ASI02"]
 
@@ -89,6 +100,7 @@ rules:
   # Change this to `effect: ask` to approve every outgoing message.
   - action: "tool.message"
     effect: allow
+    group: risky
     reason: "Sending messages (rate-limited)"
     rate_limit:
       max_calls: 30

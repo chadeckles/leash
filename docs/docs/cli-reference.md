@@ -41,6 +41,52 @@ Registering the CLI's admin identity requires the server's **admin key**. When t
 
 See the [coding agents guide](hooks.md) for how hooks work and the action vocabulary.
 
+### setup
+
+The one command most people need: finds your agents, asks for a protection level, connects each agent and checks that `rm -rf ~` is blocked.
+
+```bash
+leash setup                            # interactive
+leash setup claude-code                # just one agent
+leash setup --level strict --yes       # no questions (scripts, dotfiles)
+```
+
+| Flag | Description |
+|------|-------------|
+| `AGENT ...` | Agents to set up (default: every agent detected on this machine) |
+| `--level` | `strict`, `balanced` or `relaxed` (default: ask; without a terminal, keep the current level or use Balanced) |
+| `--yes`, `-y` | Don't ask questions; also agrees to OpenClaw's copy-install prompt |
+
+Re-running is safe: it keeps your level unless you pick another, and connects any agents installed since. It also updates bundled presets copied by an older Leash so that `leash settings` works (the old file goes to `~/.leash/backups/`). Agents are blocked from running `leash setup`.
+
+### settings
+
+Switch groups of built-in protections on or off. Saved to `~/.leash/settings.yaml`; applies to the agent's next tool call.
+
+```bash
+leash settings                  # interactive checklist
+leash settings --level relaxed  # switch level
+leash settings --show           # print and exit
+leash settings --json
+```
+
+| Level | What's on |
+|-------|-----------|
+| Strict | Everything in Balanced, plus ask before web fetches, `curl`/`wget`, `git clone` and package installs |
+| Balanced (default) | Protect Leash; block secrets and destructive commands; ask before risky actions and changes outside the project |
+| Relaxed | Protect Leash; block secrets and destructive commands |
+
+| Group | Rules | Can switch off |
+|-------|-------|----------------|
+| `tamper` | Agents can't edit `~/.leash`, their own hook settings, or run `leash allow/settings/setup/uninstall` | No |
+| `secrets` | SSH keys, cloud credentials, `.env`, browser and password stores | Yes (asks you to confirm) |
+| `destructive` | `rm -rf ~`, disk wipes, `curl \| sh`, `gh repo delete` | Yes (asks you to confirm) |
+| `risky` | `sudo`, force-push, publishing, `terraform apply`, `kubectl delete` | Yes |
+| `outside_workspace` | Writes and deletes outside the agent's folder | Yes |
+| `network` | Web fetches, downloads, package installs | Yes |
+
+Settings only switch rules tagged with `group:` in the bundled presets. Your own rules (`my_rules.yaml`, or any policy without `group:` tags) always apply. You can tag your own rules with an existing group to have them follow the switch. An unreadable settings file turns every group on until you fix it, and `leash doctor` warns about it. Settings apply to agents connected with `leash setup`/`leash install`, not to the server.
+
 ### install
 
 ```bash
@@ -335,13 +381,16 @@ leash policy test --local -a shell.exec -r "git push --force" -r "npm test" -a f
 
 ### audit summary
 
-Overview of all authorize decisions:
+Plain-English summary of the local hook audit log: how many tool calls were checked per agent, how many were allowed, asked about or blocked, the most common reasons and the latest flagged calls.
 
 ```bash
-leash audit summary
+leash audit summary              # last 24 hours
+leash audit summary --since 7d   # 30m, 24h, 7d, or a date (2026-01-31)
+leash audit summary --json
+leash audit summary --server     # the server's authorize decisions instead
 ```
 
-**Example output:**
+**Example `--server` output:**
 
 ```
   Audit Summary
@@ -489,6 +538,8 @@ leash audit tail -w           # don't shorten long commands and paths
 leash audit verify            # check the hash chain (exit 1 if broken)
 ```
 
+The record format is stable; see [Logs & SIEM](logs-and-siem.md) to forward it to Splunk, Elastic or anything that reads JSON lines.
+
 ---
 
 ## leash status
@@ -560,7 +611,7 @@ leash policy validate my-policy.yaml
 
 ## leash dashboard
 
-Live terminal dashboard with auto-refresh:
+Live terminal dashboard for the **server** (SDK and REST agents). Hooked coding agents don't use the server; use `leash audit summary`, `leash audit tail -f`, or [forward the log to your SIEM](logs-and-siem.md).
 
 ```bash
 leash dashboard

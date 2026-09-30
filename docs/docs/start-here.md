@@ -6,10 +6,13 @@ and explains every step. You don't need to know anything about security.
 By the end you will have:
 
 1. installed Leash,
-2. connected it to your agent (Claude Code, Copilot CLI, Cursor, Codex or OpenClaw),
+2. connected it to your agent (Claude Code, Copilot CLI, Cursor, Codex or OpenClaw)
+   with one command, `leash setup`,
 3. watched it block something dangerous,
 4. allowed something it was too careful about, and
-5. learned how to turn it off.
+5. learned how to make it stricter, looser, or turn it off.
+
+You never need to edit a config file.
 
 ---
 
@@ -92,7 +95,7 @@ leash --version
     uv puts tools in a folder your terminal might not know about yet. Run
     `uv tool update-shell`, then close and reopen your terminal.
 
-## Step 3: Connect Leash to your agent
+## Step 3: Set up Leash
 
 Install your agent first (for example
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) or
@@ -100,35 +103,59 @@ Install your agent first (for example
 creates its settings folder. Then:
 
 ```bash
-leash install
+leash setup
 ```
 
-Leash finds the agents on your computer and connects to each one. You can
-also name them: `leash install claude-code`. You should see something like:
+Leash finds the agents on your computer and asks one question:
+
+```text
+  Leash setup — a seatbelt for your AI agents
+
+  Found: Claude Code
+
+  How careful should Leash be?
+
+    1. Strict    Everything in Balanced, plus ask before downloading or installing anything.
+    2. Balanced  Block secrets and destructive commands; ask before risky actions. Recommended.
+    3. Relaxed   Only block secrets and destructive commands; don't ask before risky actions.
+
+  Choose 1-3 [2]:
+```
+
+Press **Enter** for Balanced. (Not sure? Balanced is what most people want,
+and you can change it any time with `leash settings`.) Leash then connects
+to each agent and checks that it works:
 
 ```text
   • Created /Users/you/.leash/policies with the bundled presets
   ✔ claude-code: Installed → /Users/you/.claude/settings.json
 
-  Leash is on: every tool call from Claude Code is now checked before it runs.
+  ✔ Checked: Leash blocks `rm -rf ~` for Claude Code
 
-  Next steps:
-    1. Restart Claude Code (sessions that are already open keep their old settings).
-    2. Check that everything is healthy:   leash doctor
-    ...
+  You're set. Every tool call from Claude Code is now checked before it runs.
+
+  1. Restart Claude Code so it picks up Leash.
+  2. Try it: ask your agent to "show me the contents of ~/.ssh".
+     Leash will block it. Then run `leash explain` to see why.
 ```
 
 **What just happened?** Leash added a small entry (a *hook*) to Claude
 Code's settings file that says "before any tool runs, ask `leash hook`
-first". It also created `~/.leash/policies/`, the folder holding the rules.
+first". It also created `~/.leash/policies/`, the folder holding the rules,
+and `~/.leash/settings.yaml`, which remembers the level you picked.
 It made a backup of any file it changed.
 
 **Restart your agent** so it picks up the new setting.
 
 !!! info "Which agents are supported?"
-    Run `leash hosts` to see which agents Leash found and which ones are connected.
-    Claude Code, GitHub Copilot CLI, Cursor, Codex and OpenClaw are
-    supported. For OpenClaw, see [the OpenClaw section](#using-openclaw) below.
+    Claude Code, GitHub Copilot CLI, Cursor, Codex and OpenClaw. Run
+    `leash hosts` to see which ones Leash found and which are connected.
+    Installed a new agent later? Just run `leash setup` again.
+    For OpenClaw, see [the OpenClaw section](#using-openclaw) below.
+
+!!! note "Setting up in a script?"
+    `leash setup --level balanced --yes` answers the questions for you.
+    `leash install` is the lower-level command that only connects agents.
 
 ## Step 4: Check that it's on
 
@@ -140,6 +167,7 @@ leash doctor
   ✔ hooks: Hooks installed: claude-code (user)
   ✔ policy_yaml: 5 policy file(s) valid
   ✔ policy_claude-code: claude-code is governed by: coding-agent
+  ✔ protection: Protection level: Balanced (off: ask before downloading or installing)
   ℹ local_audit: No local audit entries yet
   ℹ server: No server at http://localhost:8000 (not needed for hooks)
 ```
@@ -189,6 +217,27 @@ For an **ask** (like reading a `.env` file), your agent shows its normal
 permission prompt with Leash's reason. You decide yes or no.
 
 ## Step 7: See what your agent has been doing
+
+For a quick overview of the last 24 hours:
+
+```bash
+leash audit summary
+```
+
+```text
+  Leash activity · since 24h ago
+  ────────────────────────────────────────────────────────────
+  42 tool calls checked   (Claude Code 42)
+    ✔    39  allowed
+    ?     2  asked you first
+    ✘     1  blocked
+
+  Why Leash stepped in:
+       1×  SSH private keys are off-limits to agents
+       2×  .env files usually contain secrets
+```
+
+For every single call:
 
 ```bash
 leash audit tail
@@ -254,7 +303,39 @@ and so on.
     from editing `~/.leash` or their own hook settings. Only you can loosen
     the rules.
 
-## Step 9: Turn it off
+## Step 9: Make Leash stricter or looser
+
+Leash asking too often? Or want it to be more careful while you try
+something new? Run:
+
+```bash
+leash settings
+```
+
+```text
+  Leash protection: Balanced
+
+    1. [x] Protect Leash itself  (always on)
+    2. [x] Block access to passwords and keys
+    3. [x] Block destructive commands
+    4. [x] Ask before risky actions
+    5. [x] Ask before changing files outside the project
+    6. [ ] Ask before downloading or installing
+
+  Type a number to switch it on or off, s/b/r for Strict/Balanced/Relaxed,
+  Enter to save, or q to quit without saving.
+```
+
+Type `6` and press Enter to tick "Ask before downloading or installing",
+then press Enter again to save. The change applies to your agent's very next
+action; no restart needed. Or switch level in one go:
+`leash settings --level strict`.
+
+"Protect Leash itself" can't be switched off: without it, an agent could
+turn Leash off. And agents aren't allowed to run `leash settings` or
+`leash setup` themselves.
+
+## Step 10: Turn it off
 
 ```bash
 leash uninstall            # disconnect from every agent
@@ -272,6 +353,9 @@ in case you come back. To remove everything, delete that folder and run
 [OpenClaw](https://github.com/openclaw/openclaw) is a personal AI assistant
 you can message from WhatsApp, Telegram, Discord and more. Because other
 people (or a sneaky message) can talk to it, guardrails matter even more.
+
+`leash setup` connects OpenClaw automatically if it's installed. To
+connect only OpenClaw, run:
 
 ```bash
 leash install openclaw
@@ -316,11 +400,13 @@ It's designed not to. Leash only adds checks. When Leash says *allow*,
 your agent's normal permission settings still decide.
 
 **What does Leash protect by default?**
-Leash blocks: deleting your home folder or disk, reading SSH keys and cloud
-passwords, piping downloaded scripts into a shell, and tampering with Leash
-itself. It asks first before: force-pushing, `sudo`, publishing packages,
-reading `.env` files, and writing or deleting files outside your project.
-Everything else is allowed. You can read the full list in
+At the Balanced level, Leash blocks: deleting your home folder or disk,
+reading SSH keys and cloud passwords, piping downloaded scripts into a shell,
+and tampering with Leash itself. It asks first before: force-pushing, `sudo`,
+publishing packages, reading `.env` files, and writing or deleting files
+outside your project. Everything else is allowed. Strict also asks before
+downloads and installs; Relaxed stops asking and only blocks. `leash settings`
+shows exactly what's on. You can read the full list in
 `~/.leash/policies/coding_agent.yaml`, which is commented.
 
 **Is it 100% safe?**
@@ -331,8 +417,8 @@ a sandbox. For risky experiments, also use a throwaway folder, a separate
 user account or a container.
 
 **Where are my rules and how do I edit them?**
-They're in `~/.leash/policies/`. `leash allow` covers most needs without
-editing anything. When you're ready to write your own, read
+They're in `~/.leash/policies/`. `leash settings` and `leash allow` cover
+most needs without editing anything. When you're ready to write your own, read
 [Write Your First Policy](write-your-first-policy.md). Always check a
 change with `leash policy test --local` and `leash doctor`.
 
@@ -381,6 +467,10 @@ records what it *would* have blocked (`leash audit tail`).
 : The history of every decision. Each entry includes a fingerprint (hash)
   of the one before it, like links in a chain, so editing or deleting an
   entry breaks the chain, and `leash audit verify` notices.
+
+**Protection level**
+: Strict, Balanced or Relaxed: which groups of Leash's built-in rules are
+  switched on. Pick one in `leash setup`, change it with `leash settings`.
 
 **Observe mode**
 : Leash records what it *would* block without actually blocking. Useful

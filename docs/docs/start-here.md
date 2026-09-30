@@ -402,9 +402,10 @@ your agent's normal permission settings still decide.
 **What does Leash protect by default?**
 At the Balanced level, Leash blocks: deleting your home folder or disk,
 reading SSH keys and cloud passwords, piping downloaded scripts into a shell,
-and tampering with Leash itself. It asks first before: force-pushing, `sudo`,
-publishing packages, reading `.env` files, and writing or deleting files
-outside your project. Everything else is allowed. Strict also asks before
+deleting databases or cloud resources, and tampering with Leash itself. It
+asks first before: force-pushing, `sudo`, publishing packages, reading `.env`
+files, writing or deleting files outside your project, and pushing or posting
+anything after the agent has read a web page or GitHub issue. Everything else is allowed. Strict also asks before
 downloads and installs; Relaxed stops asking and only blocks. `leash settings`
 shows exactly what's on. You can read the full list in
 `~/.leash/policies/coding_agent.yaml`, which is commented.
@@ -482,7 +483,15 @@ records what it *would* have blocked (`leash audit tail`).
 **MCP**
 : *Model Context Protocol*, a standard way to plug extra tools (GitHub,
   databases, ...) into agents. Leash checks MCP tool calls too; they show up
-  as `mcp.<server>.<tool>`.
+  as `mcp.<server>.<tool>`. For Claude Desktop, VS Code and Windsurf,
+  `leash setup` offers to protect their MCP servers; see the
+  [MCP guide](mcp-proxy-guide.md).
+
+**Prompt injection**
+: Instructions hidden in something the agent reads (a web page, a GitHub
+  issue, a tool description) that try to make it do something you didn't
+  ask. After an agent reads outside content, Leash asks before it pushes,
+  posts or sends anything.
 
 **OWASP (LLM01, ASI03, ...)**
 : A security organization that publishes lists of the most common AI

@@ -13,7 +13,7 @@ and all of them ship to PyPI together as **v0.7**.
 | 2 | Hooks-first: `leash hook` / `leash install <host>` | ✅ Done (PR into `next`) |
 | 2.5 | Beginner path: OpenClaw plugin, `leash explain` / `allow`, Start Here | ✅ Done (PR into `next`) |
 | 2.6 | First-run experience: `leash setup`, protection levels, `leash settings`, `audit summary`, SIEM docs | ✅ Done (PR into `next`) |
-| 3 | Local MCP proxy (no server needed) | ⏳ Planned |
+| 3 | Local MCP proxy, tool pinning, session taint, production protection | ✅ Done (PR into `next`) |
 | 4 | v0.7 release: docs, polish, PyPI | ⏳ Planned |
 
 ## Phase 0 — Security hardening ✅
@@ -64,13 +64,17 @@ Aimed at the same first-time user: no YAML and no CLI expertise needed.
 
 *Deliberately not built:* a local web UI. The terminal checklist and existing SIEM tools cover the need without a new service to run.
 
-## Phase 3 — Local MCP proxy
+## Phase 3 — MCP and prompt-injection protection ✅
 Claude Code, Copilot CLI, Cursor and Codex already route MCP tool calls through
-their hooks, so Phase 2 covers MCP for those hosts. The proxy is only for MCP
-clients that have no hooks.
-- The proxy runs locally as a stdio wrapper around the MCP server command (nothing is hosted). It evaluates with the same local engine and audit log as `leash hook`, so it needs no server, token or registration.
-- Tool calls use the same `mcp.<server>.<tool>` actions as hooks, so one policy covers both.
-- `leash mcp wrap` rewrites an MCP client config entry to run through the proxy.
+their hooks. The proxy covers apps that have none.
+- `leash mcp run` is a local stdio wrapper around the MCP server command. Nothing is hosted; it uses the same rules, levels and audit log as `leash hook`, and tool calls use the same `mcp.<server>.<tool>` actions.
+- `leash mcp wrap` rewrites Claude Desktop, VS Code and Windsurf configs to go through it, with a backup; `leash setup` offers it and `leash uninstall` reverses it.
+- Tool pinning: descriptions are fingerprinted on first use; changed tools, or tools with hidden instructions, are held back until `leash mcp trust`.
+- `ask` rules prompt through the app (MCP elicitation) where supported; otherwise they're refused, and `leash allow --once` lets the retry through.
+- Session taint: after an agent reads web pages, GitHub issues or MCP results, the new `untrusted` group asks before it pushes, posts or sends anything.
+- New `production` group blocks `DROP`/`TRUNCATE`, database resets, `terraform destroy` and cloud delete commands, including through MCP database tools.
+
+*Deliberately not built:* sandboxing (use a dev container, VM or NVIDIA OpenShell alongside Leash), remote MCP gateways, and LLM-based content scanning.
 
 ## Phase 4 — v0.7 release
 - Docs pass, migration notes from v0.3, and the PyPI release.

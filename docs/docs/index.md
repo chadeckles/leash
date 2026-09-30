@@ -42,7 +42,7 @@ Your Agent ──▶ Leash ──▶ allow or deny
 | Get running in 60 seconds | [Getting Started](getting-started.md) |
 | Write rules for my agent | [Write Your First Policy](write-your-first-policy.md) |
 | Govern my OpenClaw assistant | [OpenClaw Integration](openclaw-guide.md) |
-| Secure my MCP tools in Claude/Cursor | [MCP Proxy Guide](mcp-proxy-guide.md) |
+| Secure MCP tools in Claude Desktop, VS Code or Windsurf | [MCP guide](mcp-proxy-guide.md) |
 | Use the Python SDK in my code | [SDK Reference](sdk-reference.md) |
 | Use the CLI | [CLI Reference](cli-reference.md) |
 | Understand how it works | [Architecture](architecture.md) |

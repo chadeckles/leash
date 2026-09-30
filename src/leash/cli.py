@@ -1121,6 +1121,23 @@ def cmd_doctor(args: argparse.Namespace) -> None:
                        f"No policy matches agent '{host}', so every tool call is denied — "
                        "run 'leash init --preset coding-agent'", "high")
 
+    from leash.cli_mcp import status_rows
+
+    for row in status_rows():
+        label = row["client"]
+        if row["error"]:
+            _check(f"mcp_{label}", "warn", row["error"], "low")
+        open_ = [s["name"] for s in row["servers"] if not s["wrapped"] and not s["remote"]]
+        held = [f"{s['name']}/{t}" for s in row["servers"] for t in s["held_back"]]
+        if open_:
+            _check(f"mcp_{label}", "warn", f"{label}: MCP servers not protected by Leash: {', '.join(open_)} "
+                   "— run 'leash mcp wrap'", "medium")
+        elif row["servers"]:
+            _check(f"mcp_{label}", "pass", f"{label}: all local MCP servers go through Leash")
+        if held:
+            _check(f"mcp_{label}_held", "warn", f"Holding back changed/suspicious MCP tools: {', '.join(held)} "
+                   "— review with 'leash mcp trust SERVER'", "medium")
+
     from leash import settings as leash_settings
 
     prefs = leash_settings.load()
@@ -1490,10 +1507,16 @@ def main() -> None:
     settings_p.add_argument("--show", action="store_true", help="Print the current settings and exit")
     settings_p.add_argument("--json", dest="json_out", action="store_true", help="Print the current settings as JSON")
 
+    from leash import cli_mcp
+
+    cli_mcp.register(sub)
+
     allow_p = sub.add_parser("allow", help="Allow a tool call Leash blocked or asked about (adds a rule to my_rules.yaml)")
     allow_p.add_argument("which", nargs="?", default="last", help="'last' (default) or N, as shown by `leash explain`")
     allow_p.add_argument("--pattern", help="Allow a glob pattern instead of exactly this resource (e.g. '/Users/me/Desktop/*')")
     allow_p.add_argument("--all-agents", action="store_true", help="Apply to every agent, not just the one that was blocked")
+    allow_p.add_argument("--once", action="store_true",
+                         help="MCP apps without prompts: let this exact call run once, if retried within 10 minutes")
     allow_p.add_argument("--undo", action="store_true", help="Remove the most recent rule added with `leash allow`")
     allow_p.add_argument("--dry-run", action="store_true", help="Show the rule without saving it")
     allow_p.add_argument("--yes", "-y", action="store_true", help="Don't ask for confirmation")
@@ -1650,6 +1673,8 @@ def main() -> None:
         cli_local.cmd_setup(args)
     elif args.command == "settings":
         cli_local.cmd_settings(args)
+    elif args.command == "mcp":
+        cli_mcp.dispatch(args)
     elif args.command == "audit" and args.audit_command == "summary" and not args.server:
         cli_local.cmd_audit_summary_local(args)
     elif args.command == "init":

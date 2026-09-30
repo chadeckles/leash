@@ -81,11 +81,13 @@ added. It applies to agents named `claude-code*`, `copilot*`, `cursor*`,
 - **Blocks** destructive commands (`rm -rf /`, `rm -rf ~`, `mkfs`, `dd of=/dev/…`, piping `curl` into `sh`).
 - **Blocks** reading credentials (`~/.ssh`, `~/.aws/credentials`, `~/.config/gh/hosts.yml`, `.netrc`, `.pypirc`, …).
 - **Blocks** the agent from editing Leash or its own hook settings, and from running `leash allow` or `leash uninstall`.
+- **Blocks** production damage: `DROP TABLE`/`TRUNCATE`, database resets (`prisma migrate reset`, `rails db:drop`, …), `terraform destroy`, deleting Kubernetes namespaces, and cloud delete commands (`aws`, `gcloud`, `az`, `fly`, `heroku`, …).
 - **Asks** before `sudo`, force-pushes, `git reset --hard`, publishing packages, `terraform apply`, `kubectl delete`, reading `.env` files, or writing outside the workspace.
+- **Asks** before pushing, posting or sending anything (`git push`, `gh pr create`, `curl -d`, MCP "send"/"post" tools) once the session has read a web page, a GitHub issue or MCP results. See [session taint](mcp-proxy-guide.md#session-taint).
 - **Strict level only:** asks before web fetches, `curl`/`wget`, `git clone` and package installs.
 
-Each bundled rule has a `group:` (`tamper`, `secrets`, `destructive`, `risky`,
-`outside_workspace`, `network`). `leash settings` switches groups on or off,
+Each bundled rule has a `group:` (`tamper`, `secrets`, `destructive`,
+`production`, `risky`, `untrusted`, `outside_workspace`, `network`). `leash settings` switches groups on or off,
 and the level you pick in `leash setup` is a preset set of switches; see the
 [CLI reference](cli-reference.md#settings). Rules without a group always apply.
 - **Allows** everything else.
@@ -209,4 +211,4 @@ you start the agent from, run for a while, then check `leash audit tail`.
 - Hooks govern what the agent asks its tools to do. A command can still do more than its text shows (e.g. `python script.py` running a script the agent wrote earlier). Combine Leash with the agent's own sandboxing for defense in depth.
 - Shell matching uses glob patterns on the command text. It is a guardrail against mistakes and prompt injection, not a sandbox.
 - Cursor cloud agents don't fire `beforeMCPExecution`.
-- Agents without hooks (for example Claude Desktop) can use the [MCP proxy](mcp-proxy-guide.md) for MCP tools.
+- Apps without hooks (Claude Desktop, VS Code, Windsurf) are covered for MCP tools by the [local MCP proxy](mcp-proxy-guide.md).

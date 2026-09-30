@@ -32,6 +32,10 @@ agents:
   - "cursor*"
   - "codex*"
   - "openclaw*"
+  - "claude-desktop*"
+  - "windsurf*"
+  - "vscode*"
+  - "mcp-client*"
 
 rules:
   # ── Tamper protection: Leash itself and the hosts' hook configuration ──
@@ -107,6 +111,54 @@ rules:
     effect: deny
     group: tamper
     reason: "Agents may not approve their own Leash exceptions; run `leash allow` yourself in a terminal"
+    owasp: ["ASI03"]
+  - action: "shell.exec"
+    resource: "*leash mcp trust*"
+    effect: deny
+    group: tamper
+    reason: "Agents may not trust MCP tools for you; run `leash mcp trust` yourself in a terminal"
+    owasp: ["ASI03"]
+  - action: "shell.exec"
+    resource: "*leash mcp unwrap*"
+    effect: deny
+    group: tamper
+    reason: "Agents may not remove Leash from MCP servers"
+    owasp: ["ASI03"]
+  - action: "file.[wd]*"
+    resource: "*/Claude/claude_desktop_config.json"
+    effect: deny
+    group: tamper
+    reason: "Agents may not change which MCP servers your apps run"
+    owasp: ["ASI03"]
+  - action: "file.[wd]*"
+    resource: "*/Code/User/mcp.json"
+    effect: deny
+    group: tamper
+    reason: "Agents may not change which MCP servers your apps run"
+    owasp: ["ASI03"]
+  - action: "file.[wd]*"
+    resource: "*/.codeium/windsurf/mcp_config.json"
+    effect: deny
+    group: tamper
+    reason: "Agents may not change which MCP servers your apps run"
+    owasp: ["ASI03"]
+  - action: "file.[wd]*"
+    resource: "*/.vscode/mcp.json"
+    effect: ask
+    group: tamper
+    reason: "Adding MCP servers to a project needs your approval"
+    owasp: ["ASI03"]
+  - action: "shell.exec"
+    resource: "*claude_desktop_config.json*"
+    effect: ask
+    group: tamper
+    reason: "Shell access to MCP app settings needs your approval"
+    owasp: ["ASI03"]
+  - action: "shell.exec"
+    resource: "*mcp_config.json*"
+    effect: ask
+    group: tamper
+    reason: "Shell access to MCP app settings needs your approval"
     owasp: ["ASI03"]
   - action: "shell.exec"
     resource: "*.leash/*"
@@ -304,6 +356,726 @@ rules:
     group: destructive
     reason: "Piping a download into a shell runs unreviewed code"
     owasp: ["ASI02", "LLM05"]
+
+  # ── Production data and cloud resources: never an unreviewed agent task ──
+  # SQL keywords are matched in any letter case.
+  - action: "shell.exec"
+    resource: "*[Dd][Rr][Oo][Pp] [Dd][Aa][Tt][Aa][Bb][Aa][Ss][Ee]*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "*[Dd][Rr][Oo][Pp] [Tt][Aa][Bb][Ll][Ee]*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "*[Dd][Rr][Oo][Pp] [Ss][Cc][Hh][Ee][Mm][Aa]*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "*[Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee] *"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "prisma migrate reset*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "prisma db push*--force-reset*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "prisma db push*--accept-data-loss*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "rails db:drop*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "rails db:reset*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "rails db:schema:load*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "rake db:drop*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "rake db:reset*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "flyway clean*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "*flyway* clean*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "alembic downgrade base*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "sequelize db:drop*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "npx sequelize* db:drop*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "knex migrate:rollback*--all*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "typeorm schema:drop*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "npx prisma migrate reset*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "npx prisma db push*--force-reset*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "npx typeorm schema:drop*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "dropdb *"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "redis-cli*FLUSHALL*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "redis-cli*flushall*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "mongosh*dropDatabase*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "terraform destroy*"
+    effect: deny
+    group: production
+    reason: "Destroying cloud infrastructure can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "terraform apply*-destroy*"
+    effect: deny
+    group: production
+    reason: "Destroying cloud infrastructure can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "terraform apply*-auto-approve*"
+    effect: deny
+    group: production
+    reason: "Destroying cloud infrastructure can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "tofu destroy*"
+    effect: deny
+    group: production
+    reason: "Destroying cloud infrastructure can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "pulumi destroy*"
+    effect: deny
+    group: production
+    reason: "Destroying cloud infrastructure can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "cdk destroy*"
+    effect: deny
+    group: production
+    reason: "Destroying cloud infrastructure can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "kubectl delete namespace*"
+    effect: deny
+    group: production
+    reason: "Destroying cloud infrastructure can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "kubectl delete ns *"
+    effect: deny
+    group: production
+    reason: "Destroying cloud infrastructure can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "kubectl delete*--all*"
+    effect: deny
+    group: production
+    reason: "Destroying cloud infrastructure can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "helm uninstall*"
+    effect: deny
+    group: production
+    reason: "Destroying cloud infrastructure can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "aws ec2 terminate-instances*"
+    effect: deny
+    group: production
+    reason: "Destroying cloud infrastructure can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "aws rds delete-*"
+    effect: deny
+    group: production
+    reason: "Destroying cloud infrastructure can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "aws s3 rb *"
+    effect: deny
+    group: production
+    reason: "Destroying cloud infrastructure can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "aws s3 rm *--recursive*"
+    effect: deny
+    group: production
+    reason: "Destroying cloud infrastructure can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "aws dynamodb delete-table*"
+    effect: deny
+    group: production
+    reason: "Destroying cloud infrastructure can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "aws cloudformation delete-stack*"
+    effect: deny
+    group: production
+    reason: "Destroying cloud infrastructure can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "aws eks delete-*"
+    effect: deny
+    group: production
+    reason: "Destroying cloud infrastructure can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "gcloud * delete*"
+    effect: deny
+    group: production
+    reason: "Destroying cloud infrastructure can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "az group delete*"
+    effect: deny
+    group: production
+    reason: "Destroying cloud infrastructure can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "az * delete *--yes*"
+    effect: deny
+    group: production
+    reason: "Destroying cloud infrastructure can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "doctl * delete*"
+    effect: deny
+    group: production
+    reason: "Destroying cloud infrastructure can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "fly apps destroy*"
+    effect: deny
+    group: production
+    reason: "Destroying cloud infrastructure can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "flyctl apps destroy*"
+    effect: deny
+    group: production
+    reason: "Destroying cloud infrastructure can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "heroku apps:destroy*"
+    effect: deny
+    group: production
+    reason: "Destroying cloud infrastructure can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "vercel remove*"
+    effect: deny
+    group: production
+    reason: "Destroying cloud infrastructure can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+  - action: "shell.exec"
+    resource: "supabase db reset*"
+    effect: deny
+    group: production
+    reason: "Destroying cloud infrastructure can't be undone; run it yourself if you mean it"
+    owasp: ["ASI02"]
+
+  # The same statements sent to an MCP database tool (e.g. run_query {sql: ...}).
+  - action: "mcp.*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    conditions:
+      arg.sql: "*[Dd][Rr][Oo][Pp] [Dd][Aa][Tt][Aa][Bb][Aa][Ss][Ee]*"
+    owasp: ["ASI02"]
+  - action: "mcp.*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    conditions:
+      arg.sql: "*[Dd][Rr][Oo][Pp] [Tt][Aa][Bb][Ll][Ee]*"
+    owasp: ["ASI02"]
+  - action: "mcp.*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    conditions:
+      arg.sql: "*[Dd][Rr][Oo][Pp] [Ss][Cc][Hh][Ee][Mm][Aa]*"
+    owasp: ["ASI02"]
+  - action: "mcp.*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    conditions:
+      arg.sql: "*[Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee] *"
+    owasp: ["ASI02"]
+  - action: "mcp.*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    conditions:
+      arg.query: "*[Dd][Rr][Oo][Pp] [Dd][Aa][Tt][Aa][Bb][Aa][Ss][Ee]*"
+    owasp: ["ASI02"]
+  - action: "mcp.*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    conditions:
+      arg.query: "*[Dd][Rr][Oo][Pp] [Tt][Aa][Bb][Ll][Ee]*"
+    owasp: ["ASI02"]
+  - action: "mcp.*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    conditions:
+      arg.query: "*[Dd][Rr][Oo][Pp] [Ss][Cc][Hh][Ee][Mm][Aa]*"
+    owasp: ["ASI02"]
+  - action: "mcp.*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    conditions:
+      arg.query: "*[Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee] *"
+    owasp: ["ASI02"]
+  - action: "mcp.*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    conditions:
+      arg.statement: "*[Dd][Rr][Oo][Pp] [Dd][Aa][Tt][Aa][Bb][Aa][Ss][Ee]*"
+    owasp: ["ASI02"]
+  - action: "mcp.*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    conditions:
+      arg.statement: "*[Dd][Rr][Oo][Pp] [Tt][Aa][Bb][Ll][Ee]*"
+    owasp: ["ASI02"]
+  - action: "mcp.*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    conditions:
+      arg.statement: "*[Dd][Rr][Oo][Pp] [Ss][Cc][Hh][Ee][Mm][Aa]*"
+    owasp: ["ASI02"]
+  - action: "mcp.*"
+    effect: deny
+    group: production
+    reason: "Destroying database data can't be undone; run it yourself if you mean it"
+    conditions:
+      arg.statement: "*[Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee] *"
+    owasp: ["ASI02"]
+
+  # ── Untrusted content: after the session read the web or an MCP result, ask
+  # before anything that pushes, posts or sends data (prompt-injection guard).
+  - action: "shell.exec"
+    resource: "git push*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "shell.exec"
+    resource: "gh pr create*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "shell.exec"
+    resource: "gh pr merge*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "shell.exec"
+    resource: "gh pr comment*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "shell.exec"
+    resource: "gh pr review*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "shell.exec"
+    resource: "gh issue create*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "shell.exec"
+    resource: "gh issue comment*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "shell.exec"
+    resource: "gh gist create*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "shell.exec"
+    resource: "gh release create*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "shell.exec"
+    resource: "gh api *-X POST*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "shell.exec"
+    resource: "gh api *--method POST*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "shell.exec"
+    resource: "gh api *-f *"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "shell.exec"
+    resource: "gh api *-F *"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "shell.exec"
+    resource: "curl *-d *"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "shell.exec"
+    resource: "curl *--data*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "shell.exec"
+    resource: "curl *-F *"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "shell.exec"
+    resource: "curl *--form*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "shell.exec"
+    resource: "curl *-X POST*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "shell.exec"
+    resource: "curl *-XPOST*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "shell.exec"
+    resource: "curl *-T *"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "shell.exec"
+    resource: "curl *--upload-file*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "shell.exec"
+    resource: "curl *--json*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "shell.exec"
+    resource: "wget *--post*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "shell.exec"
+    resource: "scp *"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "shell.exec"
+    resource: "rsync *:*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "shell.exec"
+    resource: "nc *"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "shell.exec"
+    resource: "ncat *"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "shell.exec"
+    resource: "sendmail *"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "shell.exec"
+    resource: "mail *"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "mcp.*.*send*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "mcp.*.*post*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "mcp.*.*add_*comment*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "mcp.*.*create_pull_request*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "mcp.*.*create_issue*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "mcp.*.*push*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "mcp.*.*publish*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "mcp.*.*merge*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "mcp.*.*upload*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "mcp.*.*share_*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "mcp.*.*create_*comment*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
+  - action: "mcp.*.*reply*"
+    effect: ask
+    group: untrusted
+    reason: "The agent read untrusted content earlier in this session; sending data out needs your approval"
+    conditions:
+      session_tainted: true
+    owasp: ["ASI01", "LLM01"]
 
   # ── Network and installs: ask before downloading (on in Strict) ──
   - action: "web.fetch"
@@ -582,12 +1354,6 @@ rules:
     effect: ask
     group: risky
     reason: "Changing infrastructure needs your approval"
-    owasp: ["ASI02"]
-  - action: "shell.exec"
-    resource: "terraform destroy*"
-    effect: ask
-    group: risky
-    reason: "Destroying infrastructure needs your approval"
     owasp: ["ASI02"]
 
   # ── Writes outside the workspace ──

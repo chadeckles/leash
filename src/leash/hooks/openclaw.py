@@ -117,14 +117,32 @@ def remove_files() -> bool:
     return True
 
 
+def _same_path(a: str, b: Path) -> bool:
+    try:
+        return Path(a).expanduser().resolve() == b.resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
 def is_linked() -> bool:
-    """True when OpenClaw's config lists the plugin directory."""
+    """True when ``plugins.load.paths`` in OpenClaw's config lists the plugin
+    directory.  (A copy install's record also mentions the directory as its
+    ``sourcePath``, so a plain text search isn't enough.)"""
     cfg = config_file()
     try:
         text = cfg.read_text(encoding="utf-8")
     except OSError:
         return False
     target = plugin_dir()
+    try:
+        data = json.loads(text)
+    except ValueError:
+        data = None  # JSON5 (comments, trailing commas): fall back to text
+    if isinstance(data, dict):
+        load = (data.get("plugins") or {}).get("load") or {}
+        entries = load.get("paths") if isinstance(load, dict) else None
+        return isinstance(entries, list) and any(
+            isinstance(e, str) and _same_path(e, target) for e in entries)
     forms = {str(target), target.as_posix()}
     try:
         forms.add("~/" + target.relative_to(Path.home()).as_posix())
@@ -134,7 +152,37 @@ def is_linked() -> bool:
 
 
 def is_copied() -> bool:
-    return (copied_dir() / "index.js").is_file()
+    """True when OpenClaw's extensions folder holds Leash's own plugin copy."""
+    d = copied_dir()
+    try:
+        manifest = json.loads((d / "openclaw.plugin.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return (isinstance(manifest, dict) and manifest.get("id") == PLUGIN_ID
+            and (d / "index.js").is_file() and (d / CONFIG_FILE).is_file())
+
+
+def remove_copy() -> bool:
+    """Delete Leash's plugin copy from OpenClaw's extensions folder.
+
+    ``openclaw plugins uninstall`` in 2026.3 records copy installs as linked
+    paths and so leaves the copy behind, where OpenClaw keeps discovering and
+    loading it.  Only a folder that is verifiably Leash's copy is removed.
+    """
+    if not is_copied():
+        return False
+    shutil.rmtree(copied_dir())
+    return True
+
+
+def unregister() -> Tuple[bool, str]:
+    """Remove the plugin from OpenClaw (config via its CLI, then any copy)."""
+    ok, err = run_cli(unlink_commands())
+    if not ok and is_copied() and ("not found" in err.lower() or "not managed" in err.lower()):
+        ok, err = True, ""  # a stray copy OpenClaw no longer tracks
+    if ok:
+        remove_copy()
+    return ok, err
 
 
 def is_registered() -> bool:

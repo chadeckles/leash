@@ -392,7 +392,9 @@ def _install_openclaw(target: Target, command: Optional[str], dry_run: bool,
     if copied:
         # A copy doesn't follow changes to ~/.leash. The user already agreed to
         # the copy install, so refresh it (OpenClaw won't overwrite in place).
-        ok, err = openclaw.run_cli(openclaw.unlink_commands() + copy_cmd)
+        ok, err = openclaw.unregister()
+        if ok:
+            ok, err = openclaw.run_cli(copy_cmd)
         if not ok:
             notes.append(f"Couldn't refresh the copy of the plugin in OpenClaw ({err}). Run: "
                          + "; ".join(openclaw.shell_line(c) for c in openclaw.unlink_commands() + copy_cmd))
@@ -429,14 +431,14 @@ def _install_openclaw(target: Target, command: Optional[str], dry_run: bool,
 def _uninstall_openclaw(target: Target, dry_run: bool) -> Result:
     from leash.hooks import openclaw
 
-    linked = openclaw.is_registered()
-    if not linked and not target.path.exists():
+    registered = openclaw.is_registered()
+    if not registered and not target.path.exists():
         return Result(target, "absent")
     if dry_run:
         return Result(target, "removed")
     notes: List[str] = []
-    if linked:
-        ok, err = openclaw.run_cli(openclaw.unlink_commands())
+    if registered:
+        ok, err = openclaw.unregister()
         if not ok:
             notes.append(f"Couldn't unlink the plugin automatically ({err}). Run: "
                          + "; ".join(openclaw.shell_line(c) for c in openclaw.unlink_commands()))

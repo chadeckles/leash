@@ -136,10 +136,13 @@ Not sure what your assistant calls? Run it for a while with `LEASH_MODE=observe`
 
 | Symptom | Fix |
 |---|---|
-| `leash doctor`: *plugin files exist but aren't linked* | Run the `openclaw plugins install --link …` command it prints, then restart OpenClaw. |
+| `leash doctor`: *the plugin isn't active in OpenClaw yet* | Run `leash install openclaw`, then restart OpenClaw. |
 | Every tool call is blocked with *"Blocked by Leash (fail-closed): …"* | The plugin can't run `leash`. Check that `leash --version` works for the user OpenClaw runs as, then re-run `leash install openclaw` (it records the full path to `leash`). |
 | Nothing shows up in `leash audit tail` | Check `openclaw plugins inspect leash` (add `--runtime` on newer OpenClaw to list its hooks) and make sure OpenClaw was restarted after installing. |
-| A config using `$include` isn't detected as linked | `leash doctor` searches `openclaw.json` for the plugin path. If you split your config, verify with `openclaw plugins inspect leash`. |
+| A config using `$include` isn't detected as linked | `leash doctor` reads `plugins.load.paths` in `openclaw.json`. If you split your config, verify with `openclaw plugins inspect leash`. |
+| OpenClaw says *plugins.allow is empty; discovered non-bundled plugins may auto-load* | A general OpenClaw hardening tip, not a Leash problem. If you set `plugins.allow`, OpenClaw adds `leash` to it when Leash installs the plugin. Leash never creates the list for you, because that would switch off your other plugins. |
+| `plugins inspect` says the plugin *is hook-only* | Expected. Leash only needs the `before_tool_call` hook; OpenClaw lists this as a supported plugin shape. |
+| On OpenClaw 2026.3, the plugin still loads after uninstalling it | That version's `plugins uninstall` leaves copy installs in `~/.openclaw/extensions/leash`. `leash uninstall openclaw` deletes that folder for you (only if it holds Leash's plugin). |
 
 ## Advanced: server and SDK
 

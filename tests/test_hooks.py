@@ -402,9 +402,15 @@ elif args[:2] == ["plugins", "install"] and "--dangerously-force-unsafe-install"
     if os.path.exists(copy):
         sys.exit("plugin already exists (delete it first)")
     shutil.copytree(args[2], copy)
+    # like 2026.3: a copy's record says source "path" and names the source dir
+    record = {{"source": "path", "sourcePath": args[2], "installPath": copy}}
+    open(cfg, "w").write(json.dumps({{"plugins": {{"installs": {{"leash": record}}}}}}))
 elif args[:2] == ["plugins", "uninstall"]:
+    if open(cfg).read() in ("", "{{}}"):
+        sys.exit("Plugin not found: leash")
     open(cfg, "w").write("{{}}")
-    shutil.rmtree(copy, ignore_errors=True)
+    if not os.environ.get("FAKE_OC_SCANNER"):  # 2026.3 leaves copies behind
+        shutil.rmtree(copy, ignore_errors=True)
 """
 
 
@@ -474,12 +480,22 @@ def test_openclaw_install_scanner_fallback(home, monkeypatch, fake_openclaw):
 
     r = inst.install("openclaw", confirm=lambda q: True)
     assert r.action == "updated" and openclaw.is_copied() and openclaw.is_installed(), r.notes
+    assert not openclaw.is_linked()  # the copy's record names the source dir; that isn't a link
     assert inst.install("openclaw").action == "unchanged"
     # A Leash upgrade that changes the plugin refreshes the copy without asking again
     (openclaw.copied_dir() / "index.js").write_text("// old")
     assert inst.install("openclaw").action == "updated"
     assert (openclaw.copied_dir() / "index.js").read_text() == (openclaw.plugin_dir() / "index.js").read_text()
-    assert inst.uninstall("openclaw").action == "removed" and not openclaw.is_copied()
+    assert inst.uninstall("openclaw").action == "removed"
+    assert not openclaw.copied_dir().exists() and not openclaw.is_registered()
+    # A stray copy OpenClaw no longer tracks is still cleaned up; others' folders never are
+    inst.install("openclaw", confirm=lambda q: True)
+    openclaw.config_file().write_text("{}")
+    assert inst.uninstall("openclaw").action == "removed" and not openclaw.copied_dir().exists()
+    other = openclaw.copied_dir()
+    other.mkdir(parents=True)
+    (other / "index.js").write_text("// someone else's plugin")
+    assert not openclaw.remove_copy() and other.exists()
 
 
 @pytest.mark.skipif(not __import__("shutil").which("node"), reason="node not installed")

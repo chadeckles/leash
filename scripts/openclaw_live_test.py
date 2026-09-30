@@ -188,6 +188,20 @@ def audit_entries(home: Path) -> list[dict]:
 
 # ── main ────────────────────────────────────────────────────────────────────
 
+def oc_plugin_state(home: Path) -> tuple[bool, bool, bool]:
+    """(linked, copied, recorded) for the leash plugin in the sandbox OpenClaw."""
+    cfg_text = (home / ".openclaw" / "openclaw.json").read_text()
+    try:
+        plugins = json.loads(cfg_text).get("plugins") or {}
+    except ValueError:  # JSON5: fall back to text
+        return "integrations/openclaw" in cfg_text, False, '"leash"' in cfg_text
+    paths = (plugins.get("load") or {}).get("paths") or []
+    linked = any("integrations/openclaw" in str(p) for p in paths)
+    copied = (home / ".openclaw" / "extensions" / "leash" / "index.js").is_file()
+    recorded = "leash" in (plugins.get("installs") or {}) or "leash" in (plugins.get("entries") or {})
+    return linked, copied, recorded
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--keep", action="store_true", help="don't delete the sandbox at the end")
@@ -210,7 +224,8 @@ def main() -> int:
                   "or rerun with --install-openclaw to put a throwaway copy in the sandbox.")
             return 2
 
-    sb = Path(tempfile.mkdtemp(prefix="leash-openclaw-test-"))
+    # resolve(): macOS /var is a symlink to /private/var; OpenClaw compares real paths
+    sb = Path(tempfile.mkdtemp(prefix="leash-openclaw-test-")).resolve()
     home, proj, npm = sb / "home", sb / "proj", sb / "npm"
     for d in (home / ".ssh", home / ".openclaw" / "credentials", proj, npm):
         d.mkdir(parents=True, exist_ok=True)
@@ -295,8 +310,8 @@ def main() -> int:
         log("\n== leash install openclaw ==")
         # --yes: agree to a copy install if this OpenClaw's install scan blocks linking.
         code, out = step("leash install", ["leash", "install", "openclaw", "--yes"], env, 300, cwd=proj)
-        linked = "integrations/openclaw" in (home / ".openclaw" / "openclaw.json").read_text()
-        how = "linked" if linked else ("installed as a copy (install scan)" if (copied / "index.js").is_file() else "")
+        linked, is_copy, _ = oc_plugin_state(home)
+        how = "linked" if linked else ("installed as a copy (install scan)" if is_copy else "")
         registered = code == 0 and bool(how)
         result("leash install openclaw", "PASS" if registered else "FAIL",
                f"plugin {how}" if how else "plugin NOT linked or installed")
@@ -371,13 +386,14 @@ def main() -> int:
         step("verify", ["leash", "audit", "verify"], env, 60, cwd=proj)
         step("explain", ["leash", "explain"], env, 60, cwd=proj)
         code, _ = step("uninstall", ["leash", "uninstall", "openclaw"], env, 300, cwd=proj)
-        gone = ("integrations/openclaw" not in (home / ".openclaw" / "openclaw.json").read_text()
-                and not (copied / "index.js").exists())
+        left = [what for what, there in zip(("load path", "copied files", "config record"),
+                                            oc_plugin_state(home)) if there]
+        gone = not left
         if not registered:
             result("leash uninstall openclaw", "INCONCLUSIVE", "nothing was installed to remove")
         else:
             result("leash uninstall openclaw", "PASS" if code == 0 and gone else "FAIL",
-                   "plugin removed from OpenClaw" if gone else "plugin still registered in OpenClaw")
+                   "plugin removed from OpenClaw" if gone else "left behind: " + ", ".join(left))
     finally:
         if server:
             server.shutdown()

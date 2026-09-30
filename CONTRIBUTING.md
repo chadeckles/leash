@@ -76,12 +76,14 @@ server authorization cases live in the `ENGINE_CASES` and `MATRIX` tables in
 `tests/test_engine.py` and `tests/test_policy.py`.
 
 The unit tests use a fake `openclaw`. When you change the OpenClaw plugin or
-installer, also run the live test against a real OpenClaw (needs Node 22+ and
-npm). It works in a throwaway sandbox, uses a scripted local model (no API
-key), and writes `openclaw-live-test-report.txt`:
+installer, also run the live test against a real OpenClaw. By default it uses
+the `openclaw` on your PATH, with its config and state redirected into a
+throwaway sandbox. It uses a scripted local model (no API key) and writes
+`openclaw-live-test-report.txt`:
 
 ```bash
 python3 scripts/openclaw_live_test.py            # add --keep to inspect the sandbox
+python3 scripts/openclaw_live_test.py --install-openclaw   # no OpenClaw installed yet
 ```
 
 ### 4. Lint

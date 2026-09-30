@@ -1,27 +1,30 @@
 #!/usr/bin/env python3
 """Live end-to-end test: Leash guarding a real OpenClaw install.
 
-    python3 scripts/openclaw_live_test.py            # run, then delete the sandbox
-    python3 scripts/openclaw_live_test.py --keep     # keep the sandbox to poke around
+    python3 scripts/openclaw_live_test.py                      # use the openclaw on your PATH
+    python3 scripts/openclaw_live_test.py --keep               # keep the sandbox to poke around
+    python3 scripts/openclaw_live_test.py --install-openclaw   # no OpenClaw yet: npm-install one into the sandbox
 
 Everything happens inside a throwaway temporary directory:
 
 * HOME, ~/.leash and ~/.openclaw all point into the sandbox, so your real
   config, keys and policies are never read or touched.
-* Leash goes into a sandbox venv; OpenClaw into a sandbox npm prefix.
+* Leash goes into a sandbox venv. By default the test drives the OpenClaw you
+  already have (its config and state are redirected into the sandbox, so your
+  real setup isn't read or changed); --install-openclaw npm-installs one into
+  the sandbox instead.
 * The "model" is a scripted fake OpenAI-compatible server on 127.0.0.1, so no
   API key is needed and nothing is sent to an AI provider. Provider API keys
   are removed from the environment for the same reason.
-* The only network traffic is pip/npm downloading packages (and, if your
-  Node version doesn't suit OpenClaw, a checksum-verified Node LTS from
-  nodejs.org, unpacked inside the sandbox; your own Node is left alone).
+* The only network traffic is pip (and npm with --install-openclaw).
 * The "secrets" the scenarios try to steal are fake files in the sandbox.
 
-Requires python3 >= 3.10, node >= 22 and npm. Overrides (environment variables):
-OPENCLAW_VERSION (default: latest), LEASH_SPEC (pip spec; default: this repo),
-OPENCLAW_BIN (use an existing openclaw binary instead of installing one; its
-state is still isolated in the sandbox), OPENCLAW_AGENT_ARGS (e.g. "agent exec
---json"), SCENARIO_TIMEOUT (seconds, default 180).
+Requires Python 3.11+ (like Leash) and a working OpenClaw. Leash itself adds no
+Node requirement: its plugin uses only Node built-ins, so whatever Node your
+OpenClaw runs on is fine. Overrides (environment variables): OPENCLAW_BIN (which
+openclaw to use; default: the one on PATH), LEASH_SPEC (pip spec; default: this
+repo), OPENCLAW_AGENT_ARGS (e.g. "agent exec --json"), SCENARIO_TIMEOUT
+(seconds, default 180).
 
 At the end it prints a summary and writes openclaw-live-test-report.txt in the
 current directory. That report is what to send back.
@@ -30,7 +33,6 @@ current directory. That report is what to send back.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import platform
@@ -38,11 +40,9 @@ import shlex
 import shutil
 import subprocess
 import sys
-import tarfile
 import tempfile
 import threading
 import time
-import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -186,92 +186,29 @@ def audit_entries(home: Path) -> list[dict]:
     return [json.loads(line) for line in f.read_text().splitlines() if line.strip()]
 
 
-def need(tool: str, min_major: int | None = None) -> str | None:
-    exe = shutil.which(tool)
-    if not exe:
-        return f"`{tool}` not found on PATH"
-    if min_major:
-        _, out = run([exe, "--version"], dict(os.environ), 30)
-        try:
-            if int(out.lstrip("v").split(".")[0]) < min_major:
-                return f"{tool} {out} is too old (need {min_major}+)"
-        except ValueError:
-            pass
-    return None
-
-
-# ── Node version handling ───────────────────────────────────────────────────
-
-def _ver(text: str) -> tuple[int, int, int]:
-    parts = [int("".join(c for c in p if c.isdigit()) or 0) for p in text.strip().lstrip("v=").split(".")[:3]]
-    return tuple(parts + [0] * (3 - len(parts)))  # type: ignore[return-value]
-
-
-def satisfies(version: str, spec: str) -> bool | None:
-    """Minimal npm-style range check (``>=24.16.0 <25 || >=26.1.0``); None if unparseable."""
-    v = _ver(version)
-    try:
-        for alt in spec.split("||"):
-            ok = True
-            for comp in alt.split():
-                op = next((o for o in (">=", "<=", ">", "<", "^", "=") if comp.startswith(o)), "")
-                w = _ver(comp[len(op):])
-                if op == "^":
-                    ok &= w <= v < (w[0] + 1, 0, 0)
-                else:
-                    ok &= {">=": v >= w, "<=": v <= w, ">": v > w, "<": v < w}.get(op, v == w)
-            if ok:
-                return True
-        return False
-    except (ValueError, IndexError):
-        return None
-
-
-def portable_node(sb: Path, spec: str) -> Path | None:
-    """Download the newest Node LTS satisfying ``spec`` into the sandbox; returns its bin dir."""
-    arch = {"arm64": "arm64", "aarch64": "arm64", "x86_64": "x64", "amd64": "x64"}.get(platform.machine().lower())
-    osname = {"darwin": "darwin", "linux": "linux"}.get(sys.platform)
-    if not arch or not osname:
-        log(f"      no portable Node for {sys.platform}/{platform.machine()}")
-        return None
-    try:
-        with urllib.request.urlopen("https://nodejs.org/dist/index.json", timeout=60) as r:
-            index = json.load(r)
-        rel = next(r for r in index if r.get("lts") and satisfies(r["version"], spec))
-        name = f"node-{rel['version']}-{osname}-{arch}"
-        base = f"https://nodejs.org/dist/{rel['version']}/"
-        log(f"      downloading {base}{name}.tar.gz into the sandbox")
-        with urllib.request.urlopen(base + "SHASUMS256.txt", timeout=60) as r:
-            sums = dict(reversed(line.split()) for line in r.read().decode().splitlines() if line.strip())
-        tgz = sb / f"{name}.tar.gz"
-        with urllib.request.urlopen(base + f"{name}.tar.gz", timeout=600) as r, open(tgz, "wb") as f:
-            shutil.copyfileobj(r, f)
-        if hashlib.sha256(tgz.read_bytes()).hexdigest() != sums.get(f"{name}.tar.gz"):
-            log("      checksum mismatch; not using it")
-            return None
-        with tarfile.open(tgz) as t:
-            t.extractall(sb / "node", filter="data") if sys.version_info >= (3, 12) else t.extractall(sb / "node")
-        tgz.unlink()
-        return sb / "node" / name / "bin"
-    except (OSError, StopIteration, ValueError, KeyError) as e:
-        log(f"      couldn't fetch a portable Node: {e}")
-        return None
-
-
 # ── main ────────────────────────────────────────────────────────────────────
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--keep", action="store_true", help="don't delete the sandbox at the end")
+    ap.add_argument("--install-openclaw", nargs="?", const="latest", metavar="VERSION",
+                    help="npm-install OpenClaw into the sandbox instead of using yours")
     args = ap.parse_args()
 
-    if sys.version_info < (3, 10):
-        print("Python 3.10+ required")
+    if sys.version_info < (3, 11):
+        print("Python 3.11+ required (same as Leash)")
         return 2
-    problems = [p for p in (need("node", 22), None if os.getenv("OPENCLAW_BIN") else need("npm")) if p]
-    if problems:
-        print("Missing prerequisites:\n  " + "\n  ".join(problems))
-        return 2
+    existing = None
+    if args.install_openclaw:
+        if not shutil.which("npm"):
+            print("--install-openclaw needs npm on PATH")
+            return 2
+    else:
+        existing = os.getenv("OPENCLAW_BIN") or shutil.which("openclaw")
+        if not existing or not Path(existing).expanduser().exists():
+            print("OpenClaw not found. Install it the usual way (https://docs.openclaw.ai), set OPENCLAW_BIN,\n"
+                  "or rerun with --install-openclaw to put a throwaway copy in the sandbox.")
+            return 2
 
     sb = Path(tempfile.mkdtemp(prefix="leash-openclaw-test-"))
     home, proj, npm = sb / "home", sb / "proj", sb / "npm"
@@ -297,7 +234,7 @@ def main() -> int:
     log("Leash × OpenClaw live test")
     log(f"sandbox: {sb}")
     log(f"os: {platform.platform()}  python: {platform.python_version()}")
-    log(f"node: {run(['node', '--version'], env, 30)[1]}  npm: {run(['npm', '--version'], env, 30)[1]}")
+    log(f"node on PATH: {run(['node', '--version'], env, 30)[1] or '-'}")
 
     server = None
     try:
@@ -311,27 +248,19 @@ def main() -> int:
         result("install leash", "PASS" if code == 0 else "FAIL", spec)
         if code != 0:
             return 1
-        if os.getenv("OPENCLAW_BIN"):
-            oc = Path(os.environ["OPENCLAW_BIN"]).expanduser().resolve()
-            result("install openclaw", "PASS" if oc.exists() else "FAIL", f"using existing {oc}")
+        if existing:
+            oc = Path(existing).expanduser().resolve()
+            log(f"using your OpenClaw: {oc} (state redirected to the sandbox)")
         else:
-            version = os.getenv("OPENCLAW_VERSION", "latest")
-            vcode, engines = run(["npm", "view", f"openclaw@{version}", "engines.node"], env, 120)
-            engines = engines.strip().splitlines()[-1].strip().strip('"') if vcode == 0 and engines.strip() else ""
-            node_now = run(["node", "--version"], env, 30)[1]
-            log(f"openclaw@{version} needs node {engines or '?'}; you have {node_now}")
-            if engines and satisfies(node_now, engines) is False:
-                node_bin = portable_node(sb, engines)
-                if not node_bin:
-                    result("install openclaw", "FAIL", f"needs Node {engines}; install a matching Node and retry")
-                    return 1
-                env["PATH"] = os.pathsep.join([str(node_bin), env["PATH"]])
-                log(f"      using sandbox node {run(['node', '--version'], env, 30)[1]}")
-            code, _ = step("npm", ["npm", "install", "--prefix", str(npm), f"openclaw@{version}"], env, 900)
+            version = args.install_openclaw
+            code, out = step("npm", ["npm", "install", "--prefix", str(npm), f"openclaw@{version}"], env, 900)
             oc = npm / "node_modules" / ".bin" / "openclaw"
-            result("install openclaw", "PASS" if code == 0 and oc.exists() else "FAIL", f"openclaw@{version}")
-        if not oc.exists():
-            return 1
+            detail = f"openclaw@{version}"
+            if code != 0 and "requires Node" in out:
+                detail += " refuses this Node version (OpenClaw's requirement, not Leash's); see the npm output above"
+            result("install openclaw", "PASS" if code == 0 and oc.exists() else "FAIL", detail)
+            if not oc.exists():
+                return 1
         env["PATH"] = os.pathsep.join([str(oc.parent), env["PATH"]])
         log(f"openclaw version: {run([str(oc), '--version'], env, 60)[1]}")
 

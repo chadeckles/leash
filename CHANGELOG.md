@@ -25,6 +25,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - OpenClaw guide now uses the plugin as the primary integration and shows current `register` output. CLI, SDK, MCP proxy, getting-started, and policy guides updated for the security hardening changes.
 - Fixed an invalid rule-level `observe` example in `app/policies/openclaw.yaml`.
 
+### Fixed
+- MCP proxy `--on-deny empty` was accepted but ignored. Policy denials now return an empty, non-error tool result. Leash outages and tool-change blocks still return errors.
+- `leash doctor` orphan/coverage checks read fields that `/policies/overview` no longer returns, and requested more agents than `GET /agents` allows (limit 500 > 200), so they silently reported nothing. They now use the current schema and each agent's `/permissions` match.
+
 ### Changed
 - Removed the duplicate audit entry the MCP proxy wrote after every `/authorize`. `/authorize` audit entries now also record `context` when no `resource` is given.
 - The CLI sends the admin key when auto-registering its `cli` identity.

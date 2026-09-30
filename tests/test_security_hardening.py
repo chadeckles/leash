@@ -255,3 +255,47 @@ def test_proxy_blocks_tool_changed_mid_session():
     proxy.on_tool_change = "warn"
     proxy._handle_client_message(_call("read_file", {"path": "/tmp/a"}))
     assert len(sent) == 1
+
+
+def test_proxy_on_deny_modes():
+    agent = _FakeAgent("deny")
+    proxy, sent, errors = _proxy_with(agent)
+    results = []
+    proxy._send_client_result = lambda mid, res: results.append(res)
+
+    proxy._handle_client_message(_call("delete_file", {"path": "/tmp/a"}))
+    assert not sent and errors and "denied" in errors[0] and not results
+
+    errors.clear()
+    proxy.on_deny = "empty"
+    proxy._handle_client_message(_call("delete_file", {"path": "/tmp/a"}))
+    assert not sent and not errors
+    assert results == [{"content": [], "isError": False}]
+
+
+def test_doctor_policy_checks_use_current_api(client, monkeypatch, capsys):
+    import argparse
+    import json as _json
+
+    from sdk import cli
+
+    hdr = admin_headers(client)
+    register_agent(client, "doctor-openclaw-agent")
+    register_agent(client, "doctor-uncovered-bot")
+
+    def _client(base_url, token=None):
+        client.headers.update(hdr)
+        return client
+
+    monkeypatch.setattr(cli, "_get_client", _client)
+    monkeypatch.setattr(cli, "_load_token", lambda *a, **k: "tok")
+    args = argparse.Namespace(url="http://testserver", token=None, token_file=None, json_out=True)
+    cli.cmd_doctor(args)
+    checks = {c["check"]: c for c in _json.loads(capsys.readouterr().out)["checks"]}
+
+    assert checks["coverage_gaps"]["status"] == "warn"
+    assert "doctor-uncovered-bot" in checks["coverage_gaps"]["detail"]
+    assert "doctor-openclaw-agent" not in checks["coverage_gaps"]["detail"]
+    # openclaw-policy matches a registered agent, so it must not be reported as orphaned
+    assert checks["orphan_policies"]["status"] in ("pass", "warn")
+    assert "openclaw-policy" not in checks["orphan_policies"]["detail"]

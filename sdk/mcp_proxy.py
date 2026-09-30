@@ -258,10 +258,13 @@ class MCPProxy:
         if decision != "allow":
             reason = auth.get("reason", "denied by policy")
             logger.warning("DENIED: %s → %s", tool_name, reason)
-            self._send_client_error(
-                msg_id,
-                f"Leash denied '{tool_name}': {reason}",
-            )
+            if self.on_deny == "empty":
+                self._send_client_result(msg_id, {"content": [], "isError": False})
+            else:
+                self._send_client_error(
+                    msg_id,
+                    f"Leash denied '{tool_name}': {reason}",
+                )
             return True
 
         logger.info("ALLOWED: %s", tool_name)
@@ -360,6 +363,11 @@ class MCPProxy:
             self._upstream.stdin.write(data.encode("utf-8"))
             self._upstream.stdin.flush()
 
+    def _send_client_result(self, msg_id: Any, result: dict) -> None:
+        """Send a successful JSON-RPC response back to the MCP client."""
+        sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": msg_id, "result": result}) + "\n")
+        sys.stdout.flush()
+
     def _send_client_error(self, msg_id: Any, message: str) -> None:
         """Send a JSON-RPC error response back to the MCP client."""
         error_response = {
@@ -401,7 +409,8 @@ def main() -> None:
         "--on-deny",
         choices=["error", "empty"],
         default="error",
-        help="Behaviour on deny: return error or empty result",
+        help="Behaviour on a policy deny: return a JSON-RPC error (default) or an "
+        "empty tool result. Outages and tool-change blocks always return errors.",
     )
     parser.add_argument(
         "--on-tool-change",

@@ -308,7 +308,7 @@ This maps to OWASP ASI02 (Tool Misuse & Exploitation).
 |------|---------|-------------|
 | `--leash-url` | `http://localhost:8000` | Leash server URL |
 | `--agent-name` | `mcp-proxy` | Agent name for registration |
-| `--on-deny` | `error` | Accepted values: `error` or `empty`. Current proxy behavior returns a JSON-RPC error on denied calls. |
+| `--on-deny` | `error` | On a policy deny: `error` returns a JSON-RPC error with Leash's reason; `empty` returns a successful, empty tool result (`{"content": [], "isError": false}`) for clients that handle errors poorly. Leash outages and tool-change blocks always return errors. |
 | `--on-tool-change` | `block` | When a tool definition changes mid-session: `block` further calls or only `warn` |
 | `--no-auto-discover` | (off) | Don't auto-create a policy from discovered tools |
 

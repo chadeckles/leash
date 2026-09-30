@@ -1122,46 +1122,25 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     except Exception as exc:
         _check("stale_agents", "warn", f"Agent check failed: {exc}", "low")
 
-    # ── 4. Orphaned policies (no matching agents) ─────────────────────────
+    # ── 4 & 5. Policy ↔ agent coverage ────────────────────────────────────
+    # Uses the server's own matcher via /agents/{id}/permissions, so the
+    # result reflects exactly what /authorize will do.
+    matched_policies: set[str] = set()
+    agents_checked = False
     try:
-        resp = auth_client.get("/policies/overview")
-        if resp.is_success:
-            overview = resp.json()
-            yaml_policies = overview.get("yaml_policies", [])
-            managed_active = overview.get("managed_active", 0)
-            total = len(yaml_policies) + managed_active
-            # Check if any YAML policy has zero matching agents
-            unmatched = [p["name"] for p in yaml_policies if p.get("matched_agents", 0) == 0 and p.get("name") != "default"]
-            if unmatched:
-                _check("orphan_policies", "warn",
-                       f"{len(unmatched)} policy(ies) match no agents: {', '.join(unmatched[:5])}",
-                       "low")
-            else:
-                _check("orphan_policies", "pass", f"{total} policy(ies) loaded, all matched")
-        else:
-            _check("orphan_policies", "info", "Policy overview not available")
-    except Exception:
-        _check("orphan_policies", "info", "Policy overview check skipped")
-
-    # ── 5. Policy coverage gaps (agents with no matching policies) ────────
-    try:
-        resp_agents = auth_client.get("/agents", params={"limit": 500})
+        resp_agents = auth_client.get("/agents", params={"limit": 200})
         if resp_agents.is_success:
             agents = resp_agents.json().get("agents", [])
             uncovered = []
             for a in agents:
-                try:
-                    perm_resp = auth_client.get(f"/agents/{a['agent_id']}/permissions")
-                    if perm_resp.is_success:
-                        perms = perm_resp.json()
-                        permissions = perms.get("permissions", [])
-                        # Extract unique policy names from the permissions list
-                        policy_names = {p.get("policy_name", "") for p in permissions}
-                        non_default = [p for p in policy_names if p != "default"]
-                        if not non_default:
-                            uncovered.append(a["name"])
-                except Exception:
-                    pass
+                perm_resp = auth_client.get(f"/agents/{a['agent_id']}/permissions")
+                if not perm_resp.is_success:
+                    continue
+                names = {p.get("policy_name", "") for p in perm_resp.json().get("permissions", [])}
+                matched_policies |= names
+                if not (names - {"default"}):
+                    uncovered.append(a["name"])
+            agents_checked = True
             if uncovered:
                 _check("coverage_gaps", "warn",
                        f"{len(uncovered)} agent(s) only match the default catch-all: {', '.join(uncovered[:5])}"
@@ -1169,8 +1148,29 @@ def cmd_doctor(args: argparse.Namespace) -> None:
                        "medium")
             else:
                 _check("coverage_gaps", "pass", f"All {len(agents)} agent(s) have dedicated policy coverage")
+        else:
+            _check("coverage_gaps", "info", f"Could not list agents (HTTP {resp_agents.status_code})")
+    except Exception as exc:
+        _check("coverage_gaps", "info", f"Coverage gap check skipped: {exc}")
+
+    try:
+        resp = auth_client.get("/policies/overview")
+        if resp.is_success and agents_checked:
+            policies = resp.json().get("policies", [])
+            unmatched = [p["name"] for p in policies
+                         if p.get("name") != "default" and p.get("name") not in matched_policies]
+            if unmatched:
+                _check("orphan_policies", "warn",
+                       f"{len(unmatched)} policy(ies) match no registered agents: {', '.join(unmatched[:5])}",
+                       "low")
+            else:
+                _check("orphan_policies", "pass", f"{len(policies)} policy(ies) loaded, all matched")
+        elif resp.is_success:
+            _check("orphan_policies", "info", "Orphan check skipped — agent list unavailable")
+        else:
+            _check("orphan_policies", "info", f"Policy overview not available (HTTP {resp.status_code})")
     except Exception:
-        _check("coverage_gaps", "info", "Coverage gap check skipped")
+        _check("orphan_policies", "info", "Policy overview check skipped")
 
     # ── 6. Audit integrity (hash chain + deny storms) ─────────────────────
     try:

@@ -384,19 +384,27 @@ def test_cli_install_policy_test_and_presets(home, monkeypatch, capsys):
 # ── OpenClaw plugin ────────────────────────────────────────────────────────
 
 FAKE_OPENCLAW = """#!{python}
-import json, os, sys
+import json, os, shutil, sys
 home = os.environ["HOME"]
 cfg = os.path.join(home, ".openclaw", "openclaw.json")
 os.makedirs(os.path.dirname(cfg), exist_ok=True)
 with open(os.path.join(home, "openclaw-calls.log"), "a") as fh:
     fh.write(" ".join(sys.argv[1:]) + "\\n")
 args = sys.argv[1:]
+copy = os.path.join(home, ".openclaw", "extensions", "leash")
 if args[:3] == ["plugins", "install", "--link"]:
     if "--force" in args:  # like OpenClaw >= 2026.6
         sys.exit("error: --force is not supported with --link")
+    if os.environ.get("FAKE_OC_SCANNER"):  # like OpenClaw 2026.3
+        sys.exit('Plugin "leash" installation blocked: dangerous code patterns detected')
     open(cfg, "w").write(json.dumps({{"plugins": {{"load": {{"paths": [args[3]]}}}}}}))
+elif args[:2] == ["plugins", "install"] and "--dangerously-force-unsafe-install" in args:
+    if os.path.exists(copy):
+        sys.exit("plugin already exists (delete it first)")
+    shutil.copytree(args[2], copy)
 elif args[:2] == ["plugins", "uninstall"]:
     open(cfg, "w").write("{{}}")
+    shutil.rmtree(copy, ignore_errors=True)
 """
 
 
@@ -450,6 +458,28 @@ def test_openclaw_install_lifecycle(home, monkeypatch, fake_openclaw):
     assert "name: openclaw\n" in old.read_text()
     assert list((paths.leash_home() / "backups").glob("openclaw-policy-*.yaml"))
     assert cli_local._ensure_policies(["openclaw"]) == []
+
+
+def test_openclaw_install_scanner_fallback(home, monkeypatch, fake_openclaw):
+    """OpenClaw 2026.3 refuses to link plugins that start a process; Leash asks
+    before installing a copy with OpenClaw's override flag."""
+    from leash.hooks import openclaw
+
+    monkeypatch.setenv("FAKE_OC_SCANNER", "1")
+    asked: list[str] = []
+    r = inst.install("openclaw", confirm=lambda q: asked.append(q) or False)
+    assert r.action == "partial" and asked and "leash hook openclaw" in asked[0]
+    assert any("--dangerously-force-unsafe-install" in n for n in r.notes) and not openclaw.is_installed()
+    assert inst.install("openclaw").action == "partial"  # non-interactive: never agrees on its own
+
+    r = inst.install("openclaw", confirm=lambda q: True)
+    assert r.action == "updated" and openclaw.is_copied() and openclaw.is_installed(), r.notes
+    assert inst.install("openclaw").action == "unchanged"
+    # A Leash upgrade that changes the plugin refreshes the copy without asking again
+    (openclaw.copied_dir() / "index.js").write_text("// old")
+    assert inst.install("openclaw").action == "updated"
+    assert (openclaw.copied_dir() / "index.js").read_text() == (openclaw.plugin_dir() / "index.js").read_text()
+    assert inst.uninstall("openclaw").action == "removed" and not openclaw.is_copied()
 
 
 @pytest.mark.skipif(not __import__("shutil").which("node"), reason="node not installed")

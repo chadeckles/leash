@@ -28,9 +28,16 @@ That's the whole setup. There's no server and no agent registration.
 2. Links and enables it with OpenClaw's own CLI: `openclaw plugins install --link ~/.leash/integrations/openclaw`, then `openclaw plugins enable leash`. Leash never edits `openclaw.json` itself.
 3. Installs `~/.leash/policies/openclaw.yaml`. If you had the old server-era OpenClaw preset, it's backed up to `~/.leash/backups/` first.
 
-If the `openclaw` command isn't on your PATH, Leash still writes the plugin and prints the exact `openclaw plugins install --link …` command to run later. `leash doctor` warns you until the plugin is linked.
+If the `openclaw` command isn't on your PATH, Leash still writes the plugin and prints the exact `openclaw plugins install --link …` command to run later. `leash doctor` warns you until the plugin is active.
 
-To remove it, run `leash uninstall openclaw`. This unlinks the plugin through the OpenClaw CLI and deletes the plugin files.
+### "Dangerous code patterns detected"
+
+Some OpenClaw versions (such as 2026.3) scan plugins when you install them and won't *link* any plugin that starts another program. Leash's plugin has to start one: `leash hook openclaw`, which checks each tool call. When this happens, `leash install openclaw` explains it and asks before installing a **copy** of the plugin with OpenClaw's own `--dangerously-force-unsafe-install` flag. Read the plugin first if you like; it's about 130 lines in `~/.leash/integrations/openclaw/index.js`. Newer OpenClaw versions don't scan, so linking just works.
+
+- The copy lives in `~/.openclaw/extensions/leash`. Re-run `leash install openclaw` after upgrading Leash to refresh it.
+- In scripts, `leash install openclaw --yes` agrees to the prompt. Without a terminal, Leash never agrees on its own; it prints the command instead.
+
+To remove it, run `leash uninstall openclaw`. This removes the plugin through the OpenClaw CLI (linked or copied) and deletes the plugin files.
 
 ## How it works
 

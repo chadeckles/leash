@@ -13,6 +13,12 @@ dependency-free plugin (``openclaw_plugin/``) that pipes each tool call into
 OpenClaw's config is JSON5 and owned by its CLI, so Leash never edits it
 directly: step 2 runs the ``openclaw`` CLI when it is on ``PATH`` and
 otherwise prints the command to run.
+
+Some OpenClaw versions (e.g. 2026.3) scan plugins at install time and refuse to
+link any plugin that starts a process -- which this one must do to run
+``leash hook openclaw``.  Those versions still accept a *copy* install with
+OpenClaw's own ``--dangerously-force-unsafe-install`` override, into
+``<state>/extensions/leash``.  Leash only does that after the user agrees.
 """
 
 from __future__ import annotations
@@ -51,9 +57,23 @@ def plugin_dir() -> Path:
     return paths.leash_home() / "integrations" / "openclaw"
 
 
+def copied_dir() -> Path:
+    """Where OpenClaw puts a copy-installed (not linked) plugin."""
+    return state_dir() / "extensions" / PLUGIN_ID
+
+
 def link_commands() -> List[List[str]]:
     # No --force: linking is idempotent, and OpenClaw >= 2026.6 rejects --force with --link.
     return [["openclaw", "plugins", "install", "--link", str(plugin_dir())]]
+
+
+def copy_install_commands() -> List[List[str]]:
+    return [["openclaw", "plugins", "install", str(plugin_dir()), "--dangerously-force-unsafe-install"]]
+
+
+def scanner_blocked(error: str) -> bool:
+    """True when OpenClaw's install-time code scan refused the plugin."""
+    return "dangerous code patterns" in error
 
 
 def enable_commands() -> List[List[str]]:
@@ -72,8 +92,8 @@ def rendered_files(command: List[str]) -> dict[str, str]:
     return files
 
 
-def files_current(command: List[str]) -> bool:
-    target = plugin_dir()
+def files_current(command: List[str], target: Optional[Path] = None) -> bool:
+    target = target or plugin_dir()
     for name, text in rendered_files(command).items():
         f = target / name
         if not f.is_file() or f.read_text(encoding="utf-8") != text:
@@ -113,8 +133,17 @@ def is_linked() -> bool:
     return any(form in text for form in forms)
 
 
+def is_copied() -> bool:
+    return (copied_dir() / "index.js").is_file()
+
+
+def is_registered() -> bool:
+    """True when OpenClaw loads the plugin, linked or as a copy."""
+    return is_linked() or is_copied()
+
+
 def is_installed() -> bool:
-    return (plugin_dir() / "index.js").is_file() and is_linked()
+    return (plugin_dir() / "index.js").is_file() and is_registered()
 
 
 def cli_available() -> Optional[str]:

@@ -282,15 +282,24 @@ def main() -> int:
                             "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
                             "contextWindow": 128000, "maxTokens": 4096}]}}},
             "agents": {"defaults": {"model": {"primary": f"leash-fake/{MODEL}"}, "workspace": str(proj)}},
+            # Sandbox only: turn off OpenClaw's own exec approvals (they need a running
+            # gateway) so Leash is the only thing deciding what runs.
+            "tools": {"exec": {"security": "full", "ask": "off"}},
         }
         (home / ".openclaw" / "openclaw.json").write_text(json.dumps(cfg, indent=2))
+        (home / ".openclaw" / "exec-approvals.json").write_text(json.dumps(
+            {"version": 1, "defaults": {"security": "full", "ask": "off", "askFallback": "full"}}, indent=2))
+        copied = home / ".openclaw" / "extensions" / "leash"
 
         # 3. the thing under test: leash install openclaw
         log("\n== leash install openclaw ==")
-        code, out = step("leash install", ["leash", "install", "openclaw"], env, 300, cwd=proj)
+        # --yes: agree to a copy install if this OpenClaw's install scan blocks linking.
+        code, out = step("leash install", ["leash", "install", "openclaw", "--yes"], env, 300, cwd=proj)
         linked = "integrations/openclaw" in (home / ".openclaw" / "openclaw.json").read_text()
-        result("leash install openclaw", "PASS" if code == 0 and linked else "FAIL",
-               "plugin linked in openclaw.json" if linked else "plugin NOT linked")
+        how = "linked" if linked else ("installed as a copy (install scan)" if (copied / "index.js").is_file() else "")
+        registered = code == 0 and bool(how)
+        result("leash install openclaw", "PASS" if registered else "FAIL",
+               f"plugin {how}" if how else "plugin NOT linked or installed")
         # --runtime (lists registered hooks) only exists on newer OpenClaw; fall back to plain inspect.
         code, out = step("inspect", [str(oc), "plugins", "inspect", "leash", "--runtime", "--json"], env, 120)
         if code != 0 and "unknown option" in out:
@@ -312,16 +321,17 @@ def main() -> int:
 
         for name, (tool, _, value, desc) in SCENARIOS.items():
             before_audit, before_events = len(audit_entries(home)), len(FakeModel.events)
-            original = leash_json.read_text() if name == "fail_closed" and leash_json.exists() else None
-            if original is not None:
-                leash_json.write_text(json.dumps({"command": ["/nonexistent/leash", "hook", "openclaw"]}))
+            broken = [f for f in (leash_json, copied / "leash.json") if name == "fail_closed" and f.exists()]
+            originals = {f: f.read_text() for f in broken}
+            for f in broken:
+                f.write_text(json.dumps({"command": ["/nonexistent/leash", "hook", "openclaw"]}))
             try:
                 msg = f"scenario:{name} (Leash live test: {desc})"
                 cmd = [str(oc), *agent_args, "--session-id", f"leash-live-{name}", "--message", msg]
                 code, out = step(name, cmd, env, timeout, cwd=proj)
             finally:
-                if original is not None:
-                    leash_json.write_text(original)
+                for f, text in originals.items():
+                    f.write_text(text)
             new_audit = audit_entries(home)[before_audit:]
             events = FakeModel.events[before_events:]
             tool_out = "\n".join(r for e in events for r in e["tool_results"])
@@ -332,7 +342,9 @@ def main() -> int:
             if tool_out:
                 log("      tool result seen by model:\n" + tail(tool_out, 6))
 
-            if not events:
+            if not registered:
+                result(name, "INCONCLUSIVE", "the Leash plugin isn't installed in OpenClaw, so this tests nothing")
+            elif not events:
                 result(name, "INCONCLUSIVE", "OpenClaw never called the fake model (check config/flags above)")
             elif tool not in offered:
                 result(name, "INCONCLUSIVE", f"OpenClaw didn't offer a `{tool}` tool to the model")
@@ -359,9 +371,13 @@ def main() -> int:
         step("verify", ["leash", "audit", "verify"], env, 60, cwd=proj)
         step("explain", ["leash", "explain"], env, 60, cwd=proj)
         code, _ = step("uninstall", ["leash", "uninstall", "openclaw"], env, 300, cwd=proj)
-        gone = "integrations/openclaw" not in (home / ".openclaw" / "openclaw.json").read_text()
-        result("leash uninstall openclaw", "PASS" if code == 0 and gone else "FAIL",
-               "plugin unlinked" if gone else "plugin still listed in openclaw.json")
+        gone = ("integrations/openclaw" not in (home / ".openclaw" / "openclaw.json").read_text()
+                and not (copied / "index.js").exists())
+        if not registered:
+            result("leash uninstall openclaw", "INCONCLUSIVE", "nothing was installed to remove")
+        else:
+            result("leash uninstall openclaw", "PASS" if code == 0 and gone else "FAIL",
+                   "plugin removed from OpenClaw" if gone else "plugin still registered in OpenClaw")
     finally:
         if server:
             server.shutdown()

@@ -98,7 +98,8 @@ def cmd_install(args: argparse.Namespace) -> None:
     done: list[str] = []
     for host in host_list:
         try:
-            r = inst.install(host, scope, project_dir=project_dir, command=args.hook_command, dry_run=args.dry_run)
+            r = inst.install(host, scope, project_dir=project_dir, command=args.hook_command,
+                             dry_run=args.dry_run, confirm=_install_confirm(args))
         except (OSError, ValueError) as exc:
             print(f"  ✘ {host}: {exc}", file=sys.stderr)
             failed = True
@@ -128,6 +129,21 @@ def cmd_install(args: argparse.Namespace) -> None:
         print("    4. Watch what your agent does:          leash audit tail -f")
         print("\n  When Leash blocks something, run `leash explain` to see why and how to allow it.")
     sys.exit(1 if failed else 0)
+
+
+def _install_confirm(args: argparse.Namespace):
+    if getattr(args, "yes", False):
+        return lambda _question: True
+    if not sys.stdin.isatty():
+        return None
+
+    def ask(question: str) -> bool:
+        print("\n      " + question.replace("\n", "\n      "))
+        try:
+            return input("      [y/N] ").strip().lower() in ("y", "yes")
+        except EOFError:
+            return False
+    return ask
 
 
 def cmd_uninstall(args: argparse.Namespace) -> None:

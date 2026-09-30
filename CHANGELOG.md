@@ -24,7 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Test suite consolidated from 102 to 45 tests with no loss of line coverage. Hook decisions are now a YAML case table (`tests/cases/hook_decisions.yaml`, 51 cases); engine and server authorization use inline case tables. Failures list every mismatched case.
 - `leash uninstall` with no agent names failed on Python 3.11 (an argparse quirk with `choices`); agent names are now validated directly.
 - `leash install openclaw` also runs `openclaw plugins enable leash` after linking (not fatal if it fails; the manual command is printed).
-- `scripts/openclaw_live_test.py`: an end-to-end test against a real OpenClaw install, run in a throwaway sandbox (isolated HOME, a fake local model, no API key, fake secrets). It checks allow, deny, ask, fail-closed and uninstall, and writes a report.
+- `scripts/openclaw_live_test.py`: an end-to-end test against a real OpenClaw install, run in a throwaway sandbox (isolated HOME, a fake local model, no API key, fake secrets). It checks allow, deny, ask, fail-closed and uninstall, and writes a report. If your Node version doesn't match OpenClaw's `engines`, it downloads a checksum-verified Node LTS into the sandbox.
 - `leash doctor` no longer fails on a missing server once hooks have been used (even after `leash uninstall`); `leash allow --undo` names the original rule rather than its lower-case copy.
 
 ### Coding-agent hooks (Phase 2)

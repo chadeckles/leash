@@ -12,7 +12,9 @@ Everything happens inside a throwaway temporary directory:
 * The "model" is a scripted fake OpenAI-compatible server on 127.0.0.1, so no
   API key is needed and nothing is sent to an AI provider. Provider API keys
   are removed from the environment for the same reason.
-* The only network traffic is pip/npm downloading packages.
+* The only network traffic is pip/npm downloading packages (and, if your
+  Node version doesn't suit OpenClaw, a checksum-verified Node LTS from
+  nodejs.org, unpacked inside the sandbox; your own Node is left alone).
 * The "secrets" the scenarios try to steal are fake files in the sandbox.
 
 Requires python3 >= 3.10, node >= 22 and npm. Overrides (environment variables):
@@ -28,6 +30,7 @@ current directory. That report is what to send back.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import platform
@@ -35,9 +38,11 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import threading
 import time
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -195,6 +200,64 @@ def need(tool: str, min_major: int | None = None) -> str | None:
     return None
 
 
+# ── Node version handling ───────────────────────────────────────────────────
+
+def _ver(text: str) -> tuple[int, int, int]:
+    parts = [int("".join(c for c in p if c.isdigit()) or 0) for p in text.strip().lstrip("v=").split(".")[:3]]
+    return tuple(parts + [0] * (3 - len(parts)))  # type: ignore[return-value]
+
+
+def satisfies(version: str, spec: str) -> bool | None:
+    """Minimal npm-style range check (``>=24.16.0 <25 || >=26.1.0``); None if unparseable."""
+    v = _ver(version)
+    try:
+        for alt in spec.split("||"):
+            ok = True
+            for comp in alt.split():
+                op = next((o for o in (">=", "<=", ">", "<", "^", "=") if comp.startswith(o)), "")
+                w = _ver(comp[len(op):])
+                if op == "^":
+                    ok &= w <= v < (w[0] + 1, 0, 0)
+                else:
+                    ok &= {">=": v >= w, "<=": v <= w, ">": v > w, "<": v < w}.get(op, v == w)
+            if ok:
+                return True
+        return False
+    except (ValueError, IndexError):
+        return None
+
+
+def portable_node(sb: Path, spec: str) -> Path | None:
+    """Download the newest Node LTS satisfying ``spec`` into the sandbox; returns its bin dir."""
+    arch = {"arm64": "arm64", "aarch64": "arm64", "x86_64": "x64", "amd64": "x64"}.get(platform.machine().lower())
+    osname = {"darwin": "darwin", "linux": "linux"}.get(sys.platform)
+    if not arch or not osname:
+        log(f"      no portable Node for {sys.platform}/{platform.machine()}")
+        return None
+    try:
+        with urllib.request.urlopen("https://nodejs.org/dist/index.json", timeout=60) as r:
+            index = json.load(r)
+        rel = next(r for r in index if r.get("lts") and satisfies(r["version"], spec))
+        name = f"node-{rel['version']}-{osname}-{arch}"
+        base = f"https://nodejs.org/dist/{rel['version']}/"
+        log(f"      downloading {base}{name}.tar.gz into the sandbox")
+        with urllib.request.urlopen(base + "SHASUMS256.txt", timeout=60) as r:
+            sums = dict(reversed(line.split()) for line in r.read().decode().splitlines() if line.strip())
+        tgz = sb / f"{name}.tar.gz"
+        with urllib.request.urlopen(base + f"{name}.tar.gz", timeout=600) as r, open(tgz, "wb") as f:
+            shutil.copyfileobj(r, f)
+        if hashlib.sha256(tgz.read_bytes()).hexdigest() != sums.get(f"{name}.tar.gz"):
+            log("      checksum mismatch; not using it")
+            return None
+        with tarfile.open(tgz) as t:
+            t.extractall(sb / "node", filter="data") if sys.version_info >= (3, 12) else t.extractall(sb / "node")
+        tgz.unlink()
+        return sb / "node" / name / "bin"
+    except (OSError, StopIteration, ValueError, KeyError) as e:
+        log(f"      couldn't fetch a portable Node: {e}")
+        return None
+
+
 # ── main ────────────────────────────────────────────────────────────────────
 
 def main() -> int:
@@ -253,6 +316,17 @@ def main() -> int:
             result("install openclaw", "PASS" if oc.exists() else "FAIL", f"using existing {oc}")
         else:
             version = os.getenv("OPENCLAW_VERSION", "latest")
+            vcode, engines = run(["npm", "view", f"openclaw@{version}", "engines.node"], env, 120)
+            engines = engines.strip().splitlines()[-1].strip().strip('"') if vcode == 0 and engines.strip() else ""
+            node_now = run(["node", "--version"], env, 30)[1]
+            log(f"openclaw@{version} needs node {engines or '?'}; you have {node_now}")
+            if engines and satisfies(node_now, engines) is False:
+                node_bin = portable_node(sb, engines)
+                if not node_bin:
+                    result("install openclaw", "FAIL", f"needs Node {engines}; install a matching Node and retry")
+                    return 1
+                env["PATH"] = os.pathsep.join([str(node_bin), env["PATH"]])
+                log(f"      using sandbox node {run(['node', '--version'], env, 30)[1]}")
             code, _ = step("npm", ["npm", "install", "--prefix", str(npm), f"openclaw@{version}"], env, 900)
             oc = npm / "node_modules" / ".bin" / "openclaw"
             result("install openclaw", "PASS" if code == 0 and oc.exists() else "FAIL", f"openclaw@{version}")

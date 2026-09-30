@@ -24,6 +24,7 @@ nav:
   - Coding Agents (Hooks): hooks.md
   - Write Your First Policy: write-your-first-policy.md
   - OpenClaw: openclaw-guide.md
+  - Logs & SIEM: logs-and-siem.md
   - MCP Proxy Guide: mcp-proxy-guide.md
   - SDK Reference: sdk-reference.md
   - CLI Reference: cli-reference.md

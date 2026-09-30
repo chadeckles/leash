@@ -79,6 +79,7 @@ def _fill(value, home):
 def test_decision_cases(home, monkeypatch):
     import yaml
 
+    from leash import settings
     from leash.hooks import actions
     from leash.hooks.runner import evaluate_call, load_local_policies
 
@@ -93,10 +94,11 @@ def test_decision_cases(home, monkeypatch):
                    "tool_input": _fill(case["input"], home), **case.get("payload", {})}
         with monkeypatch.context() as m:
             m.setattr(actions, "_CASE_INSENSITIVE_FS", bool(case.get("case_insensitive")))
-            verdict, _ = evaluate_call(hosts.parse(host, payload), policies, agent=case.get("agent"))
+            verdict, _ = evaluate_call(hosts.parse(host, payload), policies, agent=case.get("agent"),
+                                       skip_groups=settings.for_level(case.get("level", "balanced")).disabled)
         expect = case["expect"] if isinstance(case["expect"], list) else [case["expect"]]
         if verdict.decision not in expect or case.get("reason", "") not in verdict.reason:
-            failures.append(f"#{i} {host} {case['tool']} {case['input']}: expected {'/'.join(expect)}"
+            failures.append(f"#{i} {case.get('level', '')} {host} {case['tool']} {case['input']}: expected {'/'.join(expect)}"
                             f"{' ~' + repr(case['reason']) if 'reason' in case else ''}, "
                             f"got {verdict.decision} ({verdict.reason})")
     assert not failures, f"{len(failures)}/{len(cases)} cases failed:\n" + "\n".join(failures)
@@ -592,3 +594,50 @@ def test_allow_pattern_requires_tty(home, capsys, monkeypatch):
     cli_local.cmd_allow(_ns(pattern="git push*"))
     assert hook("claude-code", claude(home, "Bash", {"command": "git push -f origin main"}))[1] is None
 
+
+
+def test_setup_settings_and_audit_summary(home, capsys, monkeypatch):
+    import argparse
+
+    from leash import cli_local, settings
+
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    # A pre-group copy of the preset is upgraded (with a backup) so settings work.
+    old = paths.policies_dir() / "coding_agent.yaml"
+    old.write_text("\n".join(line for line in old.read_text().splitlines() if "group:" not in line))
+    with pytest.raises(SystemExit) as exc:
+        cli_local.cmd_setup(argparse.Namespace(hosts=["claude-code"], level="strict", yes=True))
+    out = capsys.readouterr().out
+    assert exc.value.code == 0, out
+    assert "Updated coding_agent.yaml" in out and "blocks `rm -rf ~` for Claude Code" in out
+    assert settings.load().level == "strict" and "group: network" in old.read_text()
+
+    web = claude(home, "WebFetch", {"url": "https://example.com"})
+    sudo = claude(home, "Bash", {"command": "sudo ls"})
+    assert hook("claude-code", web)[1]["hookSpecificOutput"]["permissionDecision"] == "ask"
+    settings_ns = argparse.Namespace(level="relaxed", show=False, json_out=False)
+    cli_local.cmd_settings(settings_ns)
+    assert hook("claude-code", web)[1] is None and hook("claude-code", sudo)[1] is None
+    # Hand-edited file: tamper can't be switched off; garbage fails closed.
+    settings.settings_file().write_text("level: custom\ngroups: {tamper: false, secrets: false}\n")
+    assert settings.load().disabled == {"secrets", "network"} and settings.load().label == "Custom"
+    settings.settings_file().write_text("[not a mapping")
+    assert settings.load().problem and not settings.load().disabled
+
+    # Interactive checklist: locked tamper refused, secrets needs a yes, s = strict.
+    settings.save(settings.for_level("balanced"))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True, raising=False)
+    answers = iter(["1", "2", "n", "4", "6", ""])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+    cli_local.cmd_settings(argparse.Namespace(level=None, show=False, json_out=False))
+    assert "can't be turned off" in capsys.readouterr().out
+    prefs = settings.load()
+    assert prefs.groups["secrets"] and not prefs.groups["risky"] and prefs.groups["network"]
+    assert prefs.label == "Custom"
+
+    hook("claude-code", claude(home, "Bash", {"command": "cat ~/.ssh/id_rsa"}))
+    cli_local.cmd_audit_summary_local(argparse.Namespace(since="1h", json_out=False))
+    out = capsys.readouterr().out
+    assert "tool calls checked" in out and "blocked" in out and "SSH" in out
+    cli_local.cmd_explain(_ns(which="2"))  # the Strict-mode web fetch ask
+    assert "Ask before downloading" in capsys.readouterr().out

@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 > Work toward the next PyPI release (0.7) lands on the `next` branch. Nothing below is published yet. Phase status is tracked in [docs/docs/roadmap.md](docs/docs/roadmap.md).
 
+### First-run experience (Phase 2.6)
+- **`leash setup`** is the new one-command start: it detects agents, asks for a protection level, connects every agent and checks that `rm -rf ~` is blocked. `--level` and `--yes` make it scriptable. `leash install` still works and keeps the current level.
+- **Protection levels and `leash settings`.** Strict, Balanced (default) and Relaxed are preset switches over six rule groups: `tamper` (always on), `secrets`, `destructive`, `risky`, `outside_workspace` and `network`. `leash settings` is an interactive checklist (`--level`, `--show`, `--json`); turning off secrets or destructive protection asks you to confirm. Saved in `~/.leash/settings.yaml`; an unreadable file turns everything on and `leash doctor` warns.
+- **Policy `group:` key.** Rules can carry a `group`; the hook runner skips groups switched off in settings. Rules without a group always apply. The engine's `evaluate_policies` / `PolicyEngine.evaluate` accept `skip_groups`, and `Decision` has a `group` field.
+- **Coding-agent preset:** every rule is grouped; new Strict-only `network` asks for `web.fetch`, `curl`/`wget`, `git clone` and package installs; agents can't run `leash settings` or `leash setup`. `gh repo delete` moved to `destructive`.
+- **Preset upgrade:** when setup/install finds a bundled preset copied by an older Leash (no `group` tags), it backs it up to `~/.leash/backups/` and installs the current one. `my_rules.yaml` is never touched.
+- **`leash audit summary`** now summarizes the local hook log by default (`--since 30m|24h|7d|DATE`, `--json`); `--server` shows the old server summary.
+- **Audit records** gain an optional `group` field. The record format is documented as stable in [Logs & SIEM](docs/docs/logs-and-siem.md) with Splunk, Elastic and Vector examples.
+- `leash explain` suggests `leash settings` when an ask comes from a group you can switch off; `leash doctor` shows the protection level.
+- Docs: Start Here uses `leash setup` and adds "Make Leash stricter or looser"; the dashboard is documented as server-only.
+
 ### Beginner path & OpenClaw (Phase 2.5)
 - **`leash install openclaw`** installs a small, dependency-free OpenClaw plugin (`~/.leash/integrations/openclaw`) and links it with `openclaw plugins install --link`. Leash never edits `openclaw.json` directly.
   - The plugin sends every `before_tool_call` to `leash hook openclaw`. Deny → blocked with the reason; ask → OpenClaw's approval prompt (`/approve`, allow once or deny); allow → OpenClaw's own settings apply.

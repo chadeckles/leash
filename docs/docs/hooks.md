@@ -2,19 +2,23 @@
 
 Leash can guard **Claude Code**, **GitHub Copilot CLI**, **Cursor**,
 **OpenAI Codex** and **[OpenClaw](openclaw-guide.md)** without a server. Each
-of these agents runs a hook before it uses a tool. `leash install` registers Leash as that hook, so every shell
+of these agents runs a hook before it uses a tool. `leash setup` registers Leash as that hook, so every shell
 command, file edit, web fetch and MCP call is checked against your YAML
 policy first.
 
 ```bash
 uv tool install leash      # or: pipx install leash
-leash install              # hooks every agent it finds on this machine
+leash setup                # hooks every agent it finds and asks for a protection level
 ```
+
+`leash install` does the same without the questions (it keeps your current level).
 
 That's the whole setup. Useful follow-ups:
 
 ```bash
+leash settings             # switch protections on or off (Strict / Balanced / Relaxed)
 leash hosts                # which agents are detected and hooked
+leash audit summary        # what your agents did in the last 24 hours
 leash audit tail -f        # watch decisions as they happen
 leash doctor               # check hooks, policies and the audit log
 leash explain              # why was the last call blocked / held for approval?
@@ -78,6 +82,12 @@ added. It applies to agents named `claude-code*`, `copilot*`, `cursor*`,
 - **Blocks** reading credentials (`~/.ssh`, `~/.aws/credentials`, `~/.config/gh/hosts.yml`, `.netrc`, `.pypirc`, …).
 - **Blocks** the agent from editing Leash or its own hook settings, and from running `leash allow` or `leash uninstall`.
 - **Asks** before `sudo`, force-pushes, `git reset --hard`, publishing packages, `terraform apply`, `kubectl delete`, reading `.env` files, or writing outside the workspace.
+- **Strict level only:** asks before web fetches, `curl`/`wget`, `git clone` and package installs.
+
+Each bundled rule has a `group:` (`tamper`, `secrets`, `destructive`, `risky`,
+`outside_workspace`, `network`). `leash settings` switches groups on or off,
+and the level you pick in `leash setup` is a preset set of switches; see the
+[CLI reference](cli-reference.md#settings). Rules without a group always apply.
 - **Allows** everything else.
 
 Edit the file to suit you; changes apply on the next tool call. To restore the
@@ -174,7 +184,9 @@ leash audit tail -n 50       # recent decisions (--json for raw lines, -f to fol
 leash audit verify           # check the hash chain
 ```
 
-Set `LEASH_AUDIT_LOG` to write somewhere else.
+Set `LEASH_AUDIT_LOG` to write somewhere else. `leash audit summary` gives a
+plain-English overview. To send the log to Splunk, Elastic or another SIEM,
+see [Logs & SIEM](logs-and-siem.md).
 
 ## Rolling out gradually
 

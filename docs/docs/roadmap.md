@@ -12,6 +12,7 @@ and all of them ship to PyPI together as **v0.7**.
 | 1 | Packaging & pure engine | ✅ Done ([#2](https://github.com/chadeckles/leash/pull/2), into `next`) |
 | 2 | Hooks-first: `leash hook` / `leash install <host>` | ✅ Done (PR into `next`) |
 | 2.5 | Beginner path: OpenClaw plugin, `leash explain` / `allow`, Start Here | ✅ Done (PR into `next`) |
+| 2.6 | First-run experience: `leash setup`, protection levels, `leash settings`, `audit summary`, SIEM docs | ✅ Done (PR into `next`) |
 | 3 | Local MCP proxy (no server needed) | ⏳ Planned |
 | 4 | v0.7 release: docs, polish, PyPI | ⏳ Planned |
 
@@ -53,6 +54,15 @@ OpenClaw) showed the gaps between "installed" and "confident":
 - `leash explain` says in plain English why something was flagged and what you can do; `leash allow` adds an exception to `my_rules.yaml` (with `--pattern`, `--undo`). Agents can't run it.
 - Every block message points to `leash explain`; install/uninstall print next steps and what's left behind.
 - [Start Here](start-here.md): a first-15-minutes tutorial with a glossary.
+
+## Phase 2.6 — First-run experience ✅
+Aimed at the same first-time user: no YAML and no CLI expertise needed.
+- `leash setup` finds your agents, asks for a protection level (Strict / Balanced / Relaxed), connects them and checks that `rm -rf ~` is blocked.
+- `leash settings` is a terminal checklist of protection groups (secrets, destructive commands, risky actions, outside the project, network). Protecting Leash itself can't be switched off; changes apply on the next tool call.
+- Bundled rules carry a `group:` tag; your own rules always apply. Older copies of the bundled presets are updated automatically, with a backup.
+- `leash audit summary` gives a plain-English overview of the local log. The audit record format is documented as stable, with [Splunk, Elastic and Vector examples](logs-and-siem.md) instead of a Leash dashboard.
+
+*Deliberately not built:* a local web UI. The terminal checklist and existing SIEM tools cover the need without a new service to run.
 
 ## Phase 3 — Local MCP proxy
 Claude Code, Copilot CLI, Cursor and Codex already route MCP tool calls through

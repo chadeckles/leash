@@ -51,9 +51,33 @@ def _ensure_policies(hosts: list[str] | None = None) -> list[str]:
         notes.append(f"Created {target} with the bundled presets")
     elif paths.install_preset("coding_agent", target):
         notes.append(f"Added the coding-agent preset to {target}")
+    else:
+        notes += _upgrade_preset(target, "coding_agent")
     if "openclaw" in (hosts or []):
-        notes += _ensure_openclaw_preset(target)
+        notes += _ensure_openclaw_preset(target) or _upgrade_preset(target, "openclaw")
     return notes
+
+
+def _upgrade_preset(target: Path, name: str) -> list[str]:
+    """Replace a bundled preset copied before rules had ``group:`` tags (so
+    `leash settings` would have no effect), keeping the old file as a backup."""
+    import shutil
+
+    import yaml
+
+    dest = target / f"{name}.yaml"
+    try:
+        doc = yaml.safe_load(dest.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return []
+    rules = doc.get("rules") if isinstance(doc, dict) else None
+    if not isinstance(rules, list) or any(isinstance(r, dict) and "group" in r for r in rules):
+        return []
+    backup = paths.leash_home() / "backups" / f"{name}-{int(time.time())}.yaml"
+    backup.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(dest), backup)
+    paths.install_preset(name, target)
+    return [f"Updated {dest.name} to the latest rules (your old copy: {backup})"]
 
 
 def _ensure_openclaw_preset(target: Path) -> list[str]:
@@ -90,7 +114,33 @@ def cmd_install(args: argparse.Namespace) -> None:
         print("  No supported agents found. Name one explicitly:", ", ".join(HOST_CHOICES))
         sys.exit(1)
 
-    if not args.dry_run:
+    done, failed = _install_hosts(host_list, args, scope=scope, project_dir=project_dir,
+                                  command=args.hook_command, dry_run=args.dry_run)
+    if not args.dry_run and done:
+        names = _names(done)
+        print(f"\n  Leash is on: every tool call from {names} is now checked before it runs.")
+        print("\n  Next steps:")
+        print(f"    1. Restart {names} (sessions that are already open keep their old settings).")
+        print("    2. Check that everything is healthy:   leash doctor")
+        print(f"    3. See a block without an agent:       leash policy test --local --agent {done[0]} -a shell.exec -r 'rm -rf ~'")
+        print("    4. Watch what your agent does:          leash audit tail -f")
+        print("\n  When Leash blocks something, run `leash explain` to see why and how to allow it.")
+    sys.exit(1 if failed else 0)
+
+
+def _names(hosts: list[str]) -> str:
+    labels = [HOST_LABELS.get(h, h) for h in hosts]
+    return labels[0] if len(labels) == 1 else ", ".join(labels[:-1]) + " and " + labels[-1]
+
+
+def _install_hosts(host_list: list[str], args: argparse.Namespace, *, scope: str = "user",
+                   project_dir: Path | None = None, command: str | None = None,
+                   dry_run: bool = False) -> tuple[list[str], bool]:
+    """Install hooks for each host, printing one line per host.  Returns the
+    hosts that are active and whether any failed."""
+    from leash.hooks import install as inst
+
+    if not dry_run:
         for note in _ensure_policies(host_list):
             print(f"  • {note}")
 
@@ -98,8 +148,8 @@ def cmd_install(args: argparse.Namespace) -> None:
     done: list[str] = []
     for host in host_list:
         try:
-            r = inst.install(host, scope, project_dir=project_dir, command=args.hook_command,
-                             dry_run=args.dry_run, confirm=_install_confirm(args))
+            r = inst.install(host, scope, project_dir=project_dir, command=command,
+                             dry_run=dry_run, confirm=_install_confirm(args))
         except (OSError, ValueError) as exc:
             print(f"  ✘ {host}: {exc}", file=sys.stderr)
             failed = True
@@ -109,26 +159,16 @@ def cmd_install(args: argparse.Namespace) -> None:
             failed = True
         else:
             verb = {"installed": "Installed", "updated": "Updated", "unchanged": "Already installed"}[r.action]
-            prefix = "Would write" if args.dry_run and r.content else verb
+            prefix = "Would write" if dry_run and r.content else verb
             print(f"  ✔ {host}: {prefix} → {r.target.path}")
             done.append(host)
         if r.backup:
             print(f"      backup: {r.backup}")
-        if args.dry_run and r.content:
+        if dry_run and r.content:
             print("      " + r.content.rstrip().replace("\n", "\n      "))
         for note in r.notes:
             print(f"      note: {note}")
-
-    if not args.dry_run and done:
-        names = ", ".join(HOST_LABELS.get(h, h) for h in done)
-        print(f"\n  Leash is on: every tool call from {names} is now checked before it runs.")
-        print("\n  Next steps:")
-        print(f"    1. Restart {names} (sessions that are already open keep their old settings).")
-        print("    2. Check that everything is healthy:   leash doctor")
-        print(f"    3. See a block without an agent:       leash policy test --local --agent {done[0]} -a shell.exec -r 'rm -rf ~'")
-        print("    4. Watch what your agent does:          leash audit tail -f")
-        print("\n  When Leash blocks something, run `leash explain` to see why and how to allow it.")
-    sys.exit(1 if failed else 0)
+    return done, failed
 
 
 def _install_confirm(args: argparse.Namespace):
@@ -310,6 +350,7 @@ def _test_call(host: str, action: str, resource: str | None):
 def cmd_policy_test_local(args: argparse.Namespace) -> None:
     import yaml
 
+    from leash import settings
     from leash.engine import PolicyDirectory, compile_policy, evaluate_policies, sort_policies
     from leash.hooks.hosts import Verdict
     from leash.hooks.runner import evaluate_call
@@ -331,7 +372,8 @@ def cmd_policy_test_local(args: argparse.Namespace) -> None:
             if call is not None:
                 v, _ = evaluate_call(call, policies, agent=agent)
             else:
-                d = evaluate_policies(policies, agent, action, resource, {}, agent_name=agent, normalize=False)
+                d = evaluate_policies(policies, agent, action, resource, {}, agent_name=agent, normalize=False,
+                                      skip_groups=settings.disabled_groups())
                 v = Verdict(d.decision, d.reason, d.matched_policy, d.matched_rule)
             label = f"{action} {resource}" if resource else action
             via = f"  via {v.policy}/{v.rule}" if v.policy else ""
@@ -526,6 +568,12 @@ def cmd_explain(args: argparse.Namespace) -> None:
     pattern = _suggest_pattern(action, resource) if base == "ask" else None
     if pattern:
         print(f"    • Always allow similar ones:  leash allow{which} --pattern {_shell_quote(pattern)}")
+    group = str(e.get("group") or "")
+    if base == "ask" and group in ("risky", "network", "outside_workspace"):
+        from leash import settings
+
+        title = next(g.title for g in settings.GROUPS if g.id == group)
+        print(f"    • Stop asking about all of these (\"{title}\"):  leash settings")
     print("    • See everything your agent did:   leash audit tail")
     if base == "deny":
         print("\n  ⚠ Leash blocks this by default because it is dangerous or exposes secrets.")
@@ -648,15 +696,260 @@ def cmd_allow(args: argparse.Namespace) -> None:
     doc["rules"].extend(rules)
     _save_my_rules(target, doc)
 
+    from leash import settings
     from leash.engine import PolicyDirectory, evaluate_policies
 
     policies = PolicyDirectory(target.parent).policies
     agent = str(e.get("agent") or host)
     ctx = {"host": host, "tool": e.get("tool", ""), "cwd": e.get("cwd", ""), "in_workspace": False}
-    check = evaluate_policies(policies, agent, action, resource, ctx, agent_name=agent, normalize=False)
+    check = evaluate_policies(policies, agent, action, resource, ctx, agent_name=agent, normalize=False,
+                              skip_groups=settings.disabled_groups())
     if check.decision == "allow":
         print(f"\n  ✔ Saved. {who[0].upper() + who[1:]} may now: {action} {resource}".rstrip())
     else:
         print(f"\n  ! Saved, but a check still says '{check.decision}' ({check.reason}). "
               f"Run `leash policy test --local` to investigate.")
     print("    Undo it any time with:  leash allow --undo\n")
+
+
+# ── setup / settings ───────────────────────────────────────────────────────
+
+_LEVEL_KEYS = {"s": "strict", "b": "balanced", "r": "relaxed"}
+
+
+def _ask_level(current: str) -> str:
+    from leash import settings
+
+    print("  How careful should Leash be?\n")
+    names = list(settings.LEVELS)
+    for i, name in enumerate(names, 1):
+        mark = "  ← current" if name == current else ""
+        print(f"    {i}. {name.capitalize():<9} {settings.LEVEL_INFO[name]}{mark}")
+    default = names.index(current) + 1 if current in names else 2
+    while True:
+        try:
+            raw = input(f"\n  Choose 1-3 [{default}]: ").strip().lower()
+        except EOFError:
+            raw = ""
+        if not raw:
+            return names[default - 1]
+        if raw.isdigit() and 1 <= int(raw) <= len(names):
+            return names[int(raw) - 1]
+        if raw in names or raw[:1] in _LEVEL_KEYS:
+            return raw if raw in names else _LEVEL_KEYS[raw[:1]]
+        print("  Please type 1, 2 or 3.")
+
+
+def cmd_setup(args: argparse.Namespace) -> None:
+    from leash import settings
+    from leash.hooks import install as inst
+    from leash.hooks.runner import evaluate_call, load_local_policies
+
+    print("\n  Leash setup — a seatbelt for your AI agents\n")
+    hosts = args.hosts or inst.detect_hosts()
+    if not hosts:
+        print("  No AI agents found on this computer yet.")
+        print(f"  Leash works with: {', '.join(HOST_LABELS.values())}.")
+        print("  Install one of them, then run `leash setup` again.\n")
+        sys.exit(1)
+    print(f"  Found: {_names(hosts)}\n")
+
+    existed = settings.settings_file().exists()
+    current = settings.load()
+    level = args.level
+    if level is None and sys.stdin.isatty() and not args.yes:
+        level = _ask_level(current.level)
+    elif level is None:
+        level = current.level if existed and current.level in settings.LEVELS else settings.DEFAULT_LEVEL
+    if level != current.level or not existed:
+        settings.save(settings.for_level(level))
+    print(f"\n  Protection level: {level.capitalize()} — {settings.LEVEL_INFO[level]}\n")
+
+    done, failed = _install_hosts(hosts, args)
+    if not done:
+        print("\n  ✘ Leash couldn't hook into any agent. Run `leash doctor` for details.\n", file=sys.stderr)
+        sys.exit(1)
+
+    policies = load_local_policies()
+    print()
+    for host in done:
+        v, _ = evaluate_call(_test_call(host, "shell.exec", "rm -rf ~"), policies, agent=host)
+        if v.decision == "deny":
+            print(f"  ✔ Checked: Leash blocks `rm -rf ~` for {HOST_LABELS.get(host, host)}")
+        else:
+            print(f"  ! {HOST_LABELS.get(host, host)}: `rm -rf ~` was '{v.decision}', not blocked. Run `leash doctor`.")
+            failed = True
+
+    names = _names(done)
+    print(f"\n  You're set. Every tool call from {names} is now checked before it runs.\n")
+    print(f"  1. Restart {names} so {'it picks' if len(done) == 1 else 'they pick'} up Leash.")
+    print("  2. Try it: ask your agent to \"show me the contents of ~/.ssh\".")
+    print("     Leash will block it. Then run `leash explain` to see why.\n")
+    print("  Later:")
+    print("    leash settings        turn protections on or off")
+    print("    leash audit summary   what your agents did today")
+    print("    leash doctor          check everything is healthy\n")
+    sys.exit(1 if failed else 0)
+
+
+def _print_settings(prefs) -> None:
+    from leash import settings
+
+    print(f"\n  Leash protection: {prefs.label}\n")
+    for i, g in enumerate(settings.GROUPS, 1):
+        on = prefs.groups.get(g.id, True)
+        box = "[x]" if on else "[ ]"
+        lock = "  (always on)" if g.locked else ""
+        print(f"    {i}. {box} {g.title}{lock}")
+        print(f"           {g.detail}")
+    print()
+
+
+def cmd_settings(args: argparse.Namespace) -> None:
+    from leash import settings
+
+    prefs = settings.load()
+    if prefs.problem:
+        print(f"  ! {prefs.problem}. Every protection is on until you save new settings.", file=sys.stderr)
+    if args.level:
+        prefs = settings.for_level(args.level)
+        settings.save(prefs)
+        print(f"  ✔ Protection level set to {prefs.label}: {settings.LEVEL_INFO[args.level]}")
+        return
+    if args.json_out:
+        print(json.dumps({"level": prefs.level, "groups": prefs.groups, "file": str(settings.settings_file())}, indent=2))
+        return
+    if args.show or not sys.stdin.isatty():
+        _print_settings(prefs)
+        if not args.show:
+            print("  (Run `leash settings` in a terminal to change these, or use --level.)\n")
+        return
+
+    changed = False
+    while True:
+        _print_settings(prefs)
+        print("  Type a number to switch it on or off, s/b/r for Strict/Balanced/Relaxed,")
+        print("  Enter to save, or q to quit without saving.")
+        try:
+            raw = input("\n  > ").strip().lower()
+        except EOFError:
+            raw = "q"
+        if raw == "":
+            break
+        if raw in ("q", "quit"):
+            print("  Nothing changed.\n")
+            return
+        if raw[:1] in _LEVEL_KEYS and not raw.isdigit():
+            prefs = settings.for_level(_LEVEL_KEYS[raw[:1]])
+            changed = True
+            continue
+        if not raw.isdigit() or not 1 <= int(raw) <= len(settings.GROUPS):
+            print(f"  Please type a number from 1 to {len(settings.GROUPS)}, s, b, r, q or Enter.")
+            continue
+        g = settings.GROUPS[int(raw) - 1]
+        if g.locked:
+            print(f"  \"{g.title}\" can't be turned off: without it an agent could switch Leash off.")
+            continue
+        turning_off = prefs.groups.get(g.id, True)
+        if turning_off and g.id in ("secrets", "destructive"):
+            print(f"  ⚠ Turning off \"{g.title}\" lets agents {g.detail[0].lower() + g.detail[1:]}")
+            try:
+                if input("  Are you sure? [y/N] ").strip().lower() not in ("y", "yes"):
+                    continue
+            except EOFError:
+                continue
+        prefs.groups[g.id] = not turning_off
+        prefs.level = settings.level_for(prefs.groups)
+        changed = True
+    if changed or prefs.problem:
+        settings.save(prefs)
+        print(f"  ✔ Saved ({prefs.label}). Takes effect on your agent's next tool call.\n")
+    else:
+        print("  Nothing changed.\n")
+
+
+# ── audit summary (local) ──────────────────────────────────────────────────
+
+def _since(value: str | None):
+    import re
+    from datetime import datetime, timedelta, timezone
+
+    if not value:
+        return None
+    m = re.fullmatch(r"(\d+)\s*([mhd])", value.strip().lower())
+    if m:
+        size = {"m": "minutes", "h": "hours", "d": "days"}[m.group(2)]
+        return datetime.now(timezone.utc) - timedelta(**{size: int(m.group(1))})
+    try:
+        then = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        print(f"  ✘ --since expects a duration like 24h or 7d, or a date like 2026-01-31, got '{value}'",
+              file=sys.stderr)
+        sys.exit(2)
+    return then if then.tzinfo else then.replace(tzinfo=timezone.utc)
+
+
+def cmd_audit_summary_local(args: argparse.Namespace) -> None:
+    from collections import Counter
+    from datetime import datetime, timezone
+
+    from leash import auditlog
+
+    log = paths.audit_log_file()
+    if not log.exists():
+        print(f"\n  Nothing yet: Leash hasn't checked any tool calls on this machine ({log}).")
+        print("  Run `leash setup` to connect your agents.\n")
+        return
+    window = args.since or "24h"
+    start = _since(window)
+    entries = []
+    for e in auditlog.read():
+        try:
+            ts = datetime.fromisoformat(str(e.get("ts", "")).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        if start is None or ts >= start:
+            entries.append(e)
+
+    kinds = Counter(str(e.get("decision", "")).replace("observe_", "") for e in entries)
+    by_agent = Counter(HOST_LABELS.get(str(e.get("host", "")), str(e.get("agent", "?"))) for e in entries)
+    flagged = [e for e in entries if e.get("decision") in _FLAGGED]
+    if args.json_out:
+        print(json.dumps({"since": start.isoformat() if start else None, "total": len(entries),
+                          "decisions": dict(kinds), "agents": dict(by_agent),
+                          "top_reasons": Counter(str(e.get("reason", "")) for e in flagged).most_common(5)},
+                         indent=2))
+        return
+
+    print(f"\n  Leash activity · since {window} ago  ({log})")
+    print(f"  {'─' * 60}")
+    if not entries:
+        print("  No tool calls in this period. Try --since 7d.\n")
+        return
+    agents = " · ".join(f"{name} {n}" for name, n in by_agent.most_common())
+    print(f"  {len(entries)} tool calls checked   ({agents})")
+    print(f"    ✔ {kinds.get('allow', 0):>5}  allowed")
+    print(f"    ? {kinds.get('ask', 0):>5}  asked you first")
+    print(f"    ✘ {kinds.get('deny', 0):>5}  blocked")
+    if any(str(e.get("decision", "")).startswith("observe_") for e in entries):
+        print("      (observe mode: some of these were only recorded, not enforced)")
+    if flagged:
+        print("\n  Why Leash stepped in:")
+        for reason, n in Counter(str(e.get("reason", "")) for e in flagged).most_common(5):
+            print(f"    {n:>4}×  {_clip(reason, 90)}")
+        print("\n  Most recent:")
+        for e in flagged[-5:]:
+            action, resource = _split_request(str(e.get("request", "")))
+            icon = _ICONS.get(str(e.get("decision", "")).replace("observe_", ""), "·")
+            who = HOST_LABELS.get(str(e.get("host", "")), str(e.get("agent", "")))
+            print(f"    {icon} {_ago(str(e.get('ts', ''))):<15} {who:<12} {_clip(_plain(action, resource), 70)}")
+        print("\n  Details on the latest one: leash explain     Everything: leash audit tail")
+    else:
+        print("\n  Nothing was blocked or questioned. 🎉")
+    print()
+
+
+def _clip(text: str, width: int) -> str:
+    return text if len(text) <= width else text[: width - 1] + "…"

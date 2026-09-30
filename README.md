@@ -18,8 +18,7 @@ You wouldn't let a dog roam the neighborhood unsupervised, so why let an AI agen
 
 ```bash
 uv tool install leash    # 1. install
-leash install            # 2. connect it to Claude Code, Copilot CLI, Cursor, Codex or OpenClaw
-leash doctor             # 3. check you're protected
+leash setup              # 2. connect Claude Code, Copilot CLI, Cursor, Codex or OpenClaw; pick a protection level
 ```
 
 No server, no account, nothing leaves your computer.
@@ -35,7 +34,9 @@ No server, no account, nothing leaves your computer.
 - 🔍 **Security scanner** — discover an MCP server's tools, classify risk, generate policies
 - 🤖 **Agent guardrails in one command** — `leash install` hooks Claude Code, Copilot CLI, Cursor, Codex and OpenClaw, with no server
 - 🙋 **Ask, don't just deny** — `effect: ask` sends risky actions to the agent's approval prompt
+- 🎚️ **Protection levels, no YAML** — `leash setup` asks Strict / Balanced / Relaxed; `leash settings` is a checklist of protections to switch on or off
 - 💬 **Explains itself** — `leash explain` says why something was blocked; `leash allow` lets it through next time
+- 📤 **Logs your SIEM can read** — one JSON line per decision in `~/.leash/audit/audit.jsonl`, ready for [Splunk, Elastic or Vector](docs/docs/logs-and-siem.md)
 - 🧩 **Framework-agnostic** — agent hooks, Python SDK, MCP proxy, or plain REST
 - 🧠 **[OpenClaw support](docs/docs/openclaw-guide.md)** — `leash install openclaw` adds a fail-closed plugin to the popular open-source AI assistant
 - 🛡️ **OWASP mapped** — rules and audit checks reference [OWASP ASI](https://owasp.org/www-project-agentic-security-initiative/) and [LLM Top 10](https://owasp.org/www-project-top-10-for-large-language-model-applications/) threat IDs
@@ -48,12 +49,14 @@ No server, no account, nothing leaves your computer.
 
 ```bash
 uv tool install leash    # or: pipx install leash   (no uv? see Start Here)
-leash install            # hooks every agent it finds; restart them afterwards
+leash setup              # hooks every agent it finds; restart them afterwards
 ```
 
-That's it: no server and no registration. Every shell command, file edit, web fetch and MCP call your agents make is checked against `~/.leash/policies/` before it runs. Destructive commands and credential reads are blocked, and risky actions (force-push, `sudo`, publishing) ask you first.
+That's it: no server, no registration and no config files to edit. Every shell command, file edit, web fetch and MCP call your agents make is checked against `~/.leash/policies/` before it runs. Destructive commands and credential reads are blocked, and risky actions (force-push, `sudo`, publishing) ask you first.
 
 ```bash
+leash settings           # stricter or looser: switch protections on or off
+leash audit summary      # what your agents did today
 leash audit tail -f      # watch what your agent does
 leash explain            # why was that blocked?
 leash allow              # ...let it through from now on (leash allow --undo to revert)
@@ -62,7 +65,9 @@ leash uninstall          # turn it off
 
 See [Start Here](docs/docs/start-here.md) for a guided walkthrough, or the [coding agents guide](docs/docs/hooks.md) for details.
 
-### Server (Python SDK, REST API, dashboard)
+### Server (advanced: Python SDK, REST API, dashboards)
+
+You don't need this for agent hooks. The server is for developers building their own agents with the SDK or REST API; it also serves the web and terminal dashboards. For monitoring hooked agents, forward the local audit log instead ([Logs & SIEM](docs/docs/logs-and-siem.md)).
 
 ```bash
 uv tool install 'leash[server]'
@@ -205,8 +210,10 @@ Rules also support rate limiting, ABAC conditions, and OWASP threat tags — see
 ## 🔍 CLI Cheat Sheet
 
 ```bash
-leash install                             # hook your agents (no server)
+leash setup                               # hook your agents and pick a protection level (no server)
+leash settings                            # switch protections on or off
 leash hosts                               # which agents are hooked
+leash audit summary                       # plain-English summary of the last 24h
 leash audit tail -f                       # watch local hook decisions
 leash explain                             # why was the last thing blocked?
 leash allow                               # allow it from now on (--undo to revert)
@@ -217,7 +224,7 @@ leash agents register --name "my-bot"     # register a new agent
 leash policy validate ~/.leash/policies/  # lint your YAML rules
 leash audit scan                          # security scan (integrity, storms, shadows)
 leash scan -- npx -y @mcp/server-fs /data # scan an MCP server's tools
-leash dashboard                           # live terminal TUI
+leash dashboard                           # live terminal TUI (server only)
 leash doctor                              # health-check your deployment
 ```
 

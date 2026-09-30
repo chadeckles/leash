@@ -45,14 +45,14 @@ No server, no account, nothing leaves your computer.
 
 ## ⬇️ Installation
 
-### AI agents (Claude Code, Copilot CLI, Cursor, Codex, OpenClaw)
+### AI agents (Claude Code, Copilot CLI, Cursor, Codex, OpenClaw, Claude Desktop, VS Code, Windsurf)
 
 ```bash
 uv tool install leash    # or: pipx install leash   (no uv? see Start Here)
-leash setup              # hooks every agent it finds; restart them afterwards
+leash setup              # protects every agent and MCP app it finds; restart them afterwards
 ```
 
-That's it: no server, no registration and no config files to edit. Every shell command, file edit, web fetch and MCP call your agents make is checked against `~/.leash/policies/` before it runs. Destructive commands and credential reads are blocked, and risky actions (force-push, `sudo`, publishing) ask you first.
+That's it: no server, no registration and no config files to edit. Every shell command, file edit, web fetch and MCP call your agents make is checked against `~/.leash/policies/` before it runs. Destructive commands, credential reads and production damage (`DROP TABLE`, `terraform destroy`) are blocked; risky actions (force-push, `sudo`, publishing) ask you first, and so does pushing or posting after the agent read a web page or GitHub issue.
 
 ```bash
 leash settings           # stricter or looser: switch protections on or off
@@ -136,19 +136,16 @@ If the action is denied, the function doesn't run. If Leash is unreachable, it d
 
 > 💡 **Deny by default.** These examples will be denied until you [write a policy](#-writing-rules) that allows the action. That's the point — nothing runs unless your rules say so.
 
-### MCP Proxy (Claude Desktop, Cursor, etc.)
+### MCP (Claude Desktop, VS Code, Windsurf)
 
-[MCP (Model Context Protocol)](https://modelcontextprotocol.io) is how AI tools like Claude Desktop and Cursor connect to external tool servers — but MCP has no built-in authorization. This proxy sits between the AI and the MCP server so every tool call is checked against your policies, with zero code changes to the server:
+[MCP](https://modelcontextprotocol.io) servers give AI apps real tools: your repos, databases, chat. Claude Code, Copilot CLI, Cursor and Codex already send MCP calls through their hooks. For apps without hooks, Leash runs as a small local wrapper around each MCP server. Nothing is hosted:
 
 ```bash
-leash-mcp-proxy \
-    --agent-name "fs-agent" \
-    -- npx -y @modelcontextprotocol/server-filesystem /data
+leash setup            # offers to protect Claude Desktop / VS Code / Windsurf
+leash mcp status       # which servers are protected, which tools are held back
 ```
 
-Every `tools/call` is authorized, logged, and checked for tool poisoning automatically. The proxy auto-discovers the server's tools on startup.
-
-See the [MCP Proxy Guide](docs/docs/mcp-proxy-guide.md) for Claude Desktop config, Cursor setup, and policy examples.
+Every tool call is checked against your rules and logged. Tools whose descriptions change or contain hidden instructions are held back until you run `leash mcp trust`. See the [MCP guide](docs/docs/mcp-proxy-guide.md).
 
 ### OpenClaw
 
@@ -217,6 +214,8 @@ leash audit summary                       # plain-English summary of the last 24
 leash audit tail -f                       # watch local hook decisions
 leash explain                             # why was the last thing blocked?
 leash allow                               # allow it from now on (--undo to revert)
+leash mcp status                          # MCP servers Leash protects, held-back tools
+leash mcp trust <server>                  # accept a changed or flagged MCP tool
 leash policy test --local -a shell.exec -r "git push --force"
 leash status                              # server health
 leash agents list                         # registered agents
@@ -246,7 +245,9 @@ src/leash/
   hooks/          ← coding-agent hook adapters + installer
   auditlog.py     ← local hash-chained audit log
   client.py       ← Python SDK (LeashAgent)
-  mcp_proxy.py    ← MCP authorization proxy
+  mcp/            ← local MCP proxy, tool pinning, client config wrapping
+  mcp_proxy.py    ← MCP proxy for server mode
+  taint.py        ← session taint (untrusted content)
   scanner.py      ← security surface scanner
   engine/         ← pure policy engine
   presets/        ← bundled starter policies

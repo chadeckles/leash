@@ -47,10 +47,13 @@ def evaluate_call(
     agent: Optional[str] = None,
     rate_limiter: Any = None,
     skip_groups: Optional[Iterable[str]] = None,
+    tainted_by: Optional[str] = None,
 ) -> tuple[Verdict, List[Dict[str, Any]]]:
     """Evaluate every request for *call*; the strictest decision wins.
 
-    *skip_groups* defaults to the groups switched off in ``leash settings``."""
+    *skip_groups* defaults to the groups switched off in ``leash settings``.
+    *tainted_by* describes the untrusted content this session read earlier
+    (see :mod:`leash.taint`); it sets ``session_tainted`` in the context."""
     from leash.engine import DEFAULT_DENY_REASON, evaluate_policies
 
     if skip_groups is None:
@@ -62,8 +65,9 @@ def evaluate_call(
     verdict: Optional[Verdict] = None
     observations: List[Dict[str, Any]] = []
     for req in requests_for(call):
+        context = {**req.context, "session_tainted": bool(tainted_by)}
         d = evaluate_policies(
-            policies, agent, req.action, req.resource, req.context,
+            policies, agent, req.action, req.resource, context,
             agent_name=agent, rate_limiter=limiter, normalize=False, skip_groups=skip_groups,
         )
         if d.observation:
@@ -71,6 +75,8 @@ def evaluate_call(
         reason = d.reason
         if d.decision != "allow" and (d.reason == DEFAULT_DENY_REASON or d.matched_policy == "default"):
             reason = f"no Leash policy allows {req.action} for agent '{agent}' — {NO_POLICY_HINT}"
+        elif d.group == "untrusted" and tainted_by:
+            reason = f"{reason} (earlier in this session the agent read: {tainted_by})"
         candidate = Verdict(d.decision, reason, d.matched_policy, d.matched_rule, req.describe(), d.group)
         if verdict is None or _RANK.get(candidate.decision, 2) > _RANK.get(verdict.decision, 2):
             verdict = candidate
@@ -124,13 +130,7 @@ def run(
             _emit(out, stdout)
             return code
 
-        from leash import paths
-        from leash.engine import FileRateLimiter
-
-        verdict, observations = evaluate_call(
-            call, load_local_policies(),
-            rate_limiter=FileRateLimiter(paths.state_dir() / "ratelimit.json"),
-        )
+        verdict, observations = decide(call)
         enforced = verdict
         if observe and verdict.decision != "allow":
             enforced = Verdict("allow")
@@ -150,7 +150,28 @@ def run(
         return 2
 
 
-def _audit(host: str, call: ToolCall, verdict: Verdict, observations, observe: bool, started: float, stderr: TextIO) -> None:
+def decide(call: ToolCall, agent: Optional[str] = None) -> tuple[Verdict, List[Dict[str, Any]]]:
+    """Evaluate *call* with the local policies, settings and session taint,
+    then record whether it tainted the session.  Shared by hooks and the MCP proxy."""
+    from leash import paths, taint
+    from leash.engine import FileRateLimiter
+
+    tainted_by = taint.source(call.host, call.session)
+    verdict, observations = evaluate_call(
+        call, load_local_policies(), agent=agent,
+        rate_limiter=FileRateLimiter(paths.state_dir() / "ratelimit.json"),
+        tainted_by=tainted_by,
+    )
+    if verdict.decision != "deny":
+        try:
+            taint.mark(call.host, call.session, requests_for(call))
+        except OSError:
+            pass
+    return verdict, observations
+
+
+def _audit(host: str, call: ToolCall, verdict: Verdict, observations, observe: bool, started: float,
+           stderr: TextIO, agent: Optional[str] = None, extra: Optional[Dict[str, Any]] = None) -> None:
     from leash import auditlog
 
     decision = verdict.decision
@@ -159,7 +180,7 @@ def _audit(host: str, call: ToolCall, verdict: Verdict, observations, observe: b
     summary = _summary(call)
     record = {
         "host": host,
-        "agent": agent_name_for(host),
+        "agent": agent or agent_name_for(host),
         "session": call.session,
         "cwd": call.cwd,
         "tool": call.tool,
@@ -176,6 +197,7 @@ def _audit(host: str, call: ToolCall, verdict: Verdict, observations, observe: b
         record["call"] = summary
     if observations:
         record["observations"] = observations
+    record.update(extra or {})
     try:
         auditlog.append(record)
     except OSError as exc:

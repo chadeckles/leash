@@ -131,7 +131,7 @@ From source, run CLI commands with `uv run leash ...`. Use `leash --version` to 
 2. **Deploy in observe mode** — capture real actions without blocking anything
 3. **Scan the audit log** — `leash audit scan` reveals what the agent actually does
 4. **[Write your first policy](write-your-first-policy.md)** — based on real data, not guesses
-5. **[Secure your MCP tools](mcp-proxy-guide.md)** — if you're using Claude Desktop, Cursor, etc.
+5. **[Secure your MCP tools](mcp-proxy-guide.md)** — if you use Claude Desktop, VS Code or Windsurf
 6. **[Use the Python SDK](sdk-reference.md)** — if you're building an agent in code
 
 !!! tip "Why scan first?"

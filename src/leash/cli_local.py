@@ -20,6 +20,16 @@ HOST_LABELS = {
 }
 
 
+def _label_for(entry: dict) -> str:
+    """Human name of the agent in an audit entry (MCP entries name the app)."""
+    host = str(entry.get("host") or entry.get("agent") or "")
+    if host == "mcp":
+        from leash.mcp.clients import label
+
+        return label(str(entry.get("mcp_client") or entry.get("agent") or ""))
+    return HOST_LABELS.get(host, host or "the agent")
+
+
 class OrderedChecks(argparse.Action):
     """Collect ``-a ACTION [-r RESOURCE ...]`` groups in command-line order,
     so each resource belongs to the action before it.  Also keeps the plain
@@ -210,6 +220,10 @@ def cmd_uninstall(args: argparse.Namespace) -> None:
             print(f"  – {host}: not installed ({r.target.path})")
         for note in r.notes:
             print(f"      note: {note}")
+    if not args.hosts and scope == "user":
+        from leash.cli_mcp import unwrap_all
+
+        removed |= unwrap_all(dry_run=args.dry_run)
     if removed and not args.dry_run:
         print("\n  Agents will no longer be checked by Leash once you restart them.")
         print(f"  Your policies and audit log are still in {paths.leash_home()}.")
@@ -527,7 +541,7 @@ def _shell_quote(text: str) -> str:
 def cmd_explain(args: argparse.Namespace) -> None:
     e = _flagged_entry(args.which)
     host = str(e.get("host") or e.get("agent") or "")
-    label = HOST_LABELS.get(host, host or "the agent")
+    label = _label_for(e)
     decision = str(e.get("decision"))
     action, resource = _split_request(str(e.get("request", "")))
     call = str(e.get("call") or "")
@@ -556,11 +570,20 @@ def cmd_explain(args: argparse.Namespace) -> None:
     print("\n  What happened:")
     if observe:
         print("    Leash is in observe mode (LEASH_MODE=observe), so this was only recorded — it was not blocked.")
+    elif e.get("mcp_withheld"):
+        print(f"    Leash hid this tool from {label}, so the AI can't use it until you review it.")
     elif base == "deny":
         print(f"    It did not run. {label} was told it was blocked and why.")
+    elif host == "mcp":
+        print(f"    {'You approved it, so it ran.' if e.get('approved') else 'It did not run (not approved).'}")
     else:
         print(f"    {_ASK_OUTCOME.get(host, 'Your agent asked you to approve it.')}")
 
+    if e.get("mcp_withheld"):
+        print("\n  What you can do:")
+        print(f"    • Review the tool's description and trust it if it looks fine:  leash mcp trust {e.get('mcp_server')}")
+        print("    • Leave it hidden. The rest of the server keeps working.\n")
+        return
     print("\n  What you can do:")
     print("    • Nothing. If an agent shouldn't do this, Leash did its job.")
     which = "" if args.which in ("", "last") else f" {args.which}"
@@ -569,7 +592,7 @@ def cmd_explain(args: argparse.Namespace) -> None:
     if pattern:
         print(f"    • Always allow similar ones:  leash allow{which} --pattern {_shell_quote(pattern)}")
     group = str(e.get("group") or "")
-    if base == "ask" and group in ("risky", "network", "outside_workspace"):
+    if base == "ask" and group in ("risky", "untrusted", "network", "outside_workspace"):
         from leash import settings
 
         title = next(g.title for g in settings.GROUPS if g.id == group)
@@ -655,7 +678,11 @@ def cmd_allow(args: argparse.Namespace) -> None:
 
     e = _flagged_entry(args.which)
     host = str(e.get("host") or "")
-    label = HOST_LABELS.get(host, host or "every agent")
+    label = _label_for(e) if host else "every agent"
+    if e.get("mcp_withheld"):
+        print(f"  That tool is held back because its description changed or looks suspicious.\n"
+              f"  Review it with:  leash mcp trust {e.get('mcp_server')}")
+        sys.exit(1)
     action, resource = _split_request(str(e.get("request", "")))
     if not action:
         print("  ✘ That audit entry has no action to allow.", file=sys.stderr)
@@ -745,14 +772,21 @@ def cmd_setup(args: argparse.Namespace) -> None:
     from leash.hooks import install as inst
     from leash.hooks.runner import evaluate_call, load_local_policies
 
+    from leash.cli_mcp import wrap_clients
+    from leash.mcp import clients as mcp_clients
+
     print("\n  Leash setup — a seatbelt for your AI agents\n")
     hosts = args.hosts or inst.detect_hosts()
-    if not hosts:
+    apps = [] if args.hosts else [c for c in mcp_clients.detect()
+                                  if any(not s.wrapped and not s.remote for s in mcp_clients.servers(c)[0])]
+    if not hosts and not apps:
         print("  No AI agents found on this computer yet.")
-        print(f"  Leash works with: {', '.join(HOST_LABELS.values())}.")
+        print(f"  Leash works with: {', '.join(HOST_LABELS.values())},")
+        print("  and MCP servers in Claude Desktop, VS Code and Windsurf.")
         print("  Install one of them, then run `leash setup` again.\n")
         sys.exit(1)
-    print(f"  Found: {_names(hosts)}\n")
+    found = [HOST_LABELS.get(h, h) for h in hosts] + [f"MCP servers in {mcp_clients.label(c)}" for c in apps]
+    print(f"  Found: {found[0] if len(found) == 1 else ', '.join(found[:-1]) + ' and ' + found[-1]}\n")
 
     existed = settings.settings_file().exists()
     current = settings.load()
@@ -765,8 +799,16 @@ def cmd_setup(args: argparse.Namespace) -> None:
         settings.save(settings.for_level(level))
     print(f"\n  Protection level: {level.capitalize()} — {settings.LEVEL_INFO[level]}\n")
 
-    done, failed = _install_hosts(hosts, args)
-    if not done:
+    done, failed = _install_hosts(hosts, args) if hosts else ([], False)
+    if not hosts:
+        _ensure_policies()
+    wrapped = []
+    if apps:
+        print("\n  Claude Desktop, VS Code and Windsurf have no hooks, so Leash protects their MCP")
+        print("  servers by starting each one through `leash mcp run` (your config is backed up).")
+        if args.yes or not sys.stdin.isatty() or _yes("  Protect them? [Y/n] "):
+            wrapped = wrap_clients(apps)
+    if not done and not wrapped:
         print("\n  ✘ Leash couldn't hook into any agent. Run `leash doctor` for details.\n", file=sys.stderr)
         sys.exit(1)
 
@@ -780,9 +822,10 @@ def cmd_setup(args: argparse.Namespace) -> None:
             print(f"  ! {HOST_LABELS.get(host, host)}: `rm -rf ~` was '{v.decision}', not blocked. Run `leash doctor`.")
             failed = True
 
-    names = _names(done)
+    labels = [HOST_LABELS.get(h, h) for h in done] + [mcp_clients.label(c) for c in wrapped]
+    names = labels[0] if len(labels) == 1 else ", ".join(labels[:-1]) + " and " + labels[-1]
     print(f"\n  You're set. Every tool call from {names} is now checked before it runs.\n")
-    print(f"  1. Restart {names} so {'it picks' if len(done) == 1 else 'they pick'} up Leash.")
+    print(f"  1. Restart {names} so {'it picks' if len(labels) == 1 else 'they pick'} up Leash.")
     print("  2. Try it: ask your agent to \"show me the contents of ~/.ssh\".")
     print("     Leash will block it. Then run `leash explain` to see why.\n")
     print("  Later:")
@@ -790,6 +833,13 @@ def cmd_setup(args: argparse.Namespace) -> None:
     print("    leash audit summary   what your agents did today")
     print("    leash doctor          check everything is healthy\n")
     sys.exit(1 if failed else 0)
+
+
+def _yes(prompt: str) -> bool:
+    try:
+        return input(prompt).strip().lower() in ("", "y", "yes")
+    except EOFError:
+        return True
 
 
 def _print_settings(prefs) -> None:
@@ -851,7 +901,7 @@ def cmd_settings(args: argparse.Namespace) -> None:
             print(f"  \"{g.title}\" can't be turned off: without it an agent could switch Leash off.")
             continue
         turning_off = prefs.groups.get(g.id, True)
-        if turning_off and g.id in ("secrets", "destructive"):
+        if turning_off and g.id in ("secrets", "destructive", "production"):
             print(f"  ⚠ Turning off \"{g.title}\" lets agents {g.detail[0].lower() + g.detail[1:]}")
             try:
                 if input("  Are you sure? [y/N] ").strip().lower() not in ("y", "yes"):

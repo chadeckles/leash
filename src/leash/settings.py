@@ -35,8 +35,12 @@ GROUPS = (
           "SSH keys, cloud credentials, .env files, browser and password stores."),
     Group("destructive", "Block destructive commands",
           "rm -rf ~, disk wipes, curl | sh, deleting repositories."),
+    Group("production", "Protect databases and cloud resources",
+          "DROP/TRUNCATE, database resets, terraform destroy, deleting clusters and cloud resources."),
     Group("risky", "Ask before risky actions",
-          "sudo, force-push, publishing packages, deleting cloud resources."),
+          "sudo, force-push, publishing packages, terraform apply, kubectl delete."),
+    Group("untrusted", "Ask before acting on untrusted content",
+          "After the agent reads web pages or MCP results, ask before it pushes, posts or sends anything."),
     Group("outside_workspace", "Ask before changing files outside the project",
           "Writing or deleting files outside the folder the agent was started in."),
     Group("network", "Ask before downloading or installing",
@@ -48,12 +52,12 @@ _ALL = frozenset(GROUP_IDS)
 LEVELS: Dict[str, FrozenSet[str]] = {
     "strict": _ALL,
     "balanced": _ALL - {"network"},
-    "relaxed": frozenset({"tamper", "secrets", "destructive"}),
+    "relaxed": frozenset({"tamper", "secrets", "destructive", "production"}),
 }
 LEVEL_INFO = {
     "strict": "Everything in Balanced, plus ask before downloading or installing anything.",
     "balanced": "Block secrets and destructive commands; ask before risky actions. Recommended.",
-    "relaxed": "Only block secrets and destructive commands; don't ask before risky actions.",
+    "relaxed": "Only block secrets, destructive commands and production damage; don't ask before risky actions.",
 }
 DEFAULT_LEVEL = "balanced"
 

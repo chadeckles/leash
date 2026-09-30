@@ -73,15 +73,17 @@ leash settings --json
 | Level | What's on |
 |-------|-----------|
 | Strict | Everything in Balanced, plus ask before web fetches, `curl`/`wget`, `git clone` and package installs |
-| Balanced (default) | Protect Leash; block secrets and destructive commands; ask before risky actions and changes outside the project |
-| Relaxed | Protect Leash; block secrets and destructive commands |
+| Balanced (default) | Protect Leash; block secrets, destructive commands and production damage; ask before risky actions, acting on untrusted content, and changes outside the project |
+| Relaxed | Protect Leash; block secrets, destructive commands and production damage |
 
 | Group | Rules | Can switch off |
 |-------|-------|----------------|
-| `tamper` | Agents can't edit `~/.leash`, their own hook settings, or run `leash allow/settings/setup/uninstall` | No |
+| `tamper` | Agents can't edit `~/.leash`, their own hook settings, or run `leash allow/settings/setup/uninstall/mcp trust` | No |
 | `secrets` | SSH keys, cloud credentials, `.env`, browser and password stores | Yes (asks you to confirm) |
 | `destructive` | `rm -rf ~`, disk wipes, `curl \| sh`, `gh repo delete` | Yes (asks you to confirm) |
+| `production` | `DROP TABLE`/`TRUNCATE`, database resets, `terraform destroy`, deleting namespaces and cloud resources | Yes (asks you to confirm) |
 | `risky` | `sudo`, force-push, publishing, `terraform apply`, `kubectl delete` | Yes |
+| `untrusted` | After the session read a web page, GitHub issue or MCP result: pushing, posting, uploading, MCP send/post tools | Yes |
 | `outside_workspace` | Writes and deletes outside the agent's folder | Yes |
 | `network` | Web fetches, downloads, package installs | Yes |
 
@@ -162,6 +164,20 @@ leash hook claude-code < payload.json
 The command the agents run for every tool call. It reads the agent's JSON on stdin and prints the decision in that agent's format. `auto` detects the agent from the payload. Exit code 2 means Leash itself failed and the call is blocked (unless `LEASH_FAIL_OPEN=1`).
 
 ---
+
+## leash mcp
+
+Protect MCP servers in apps without hooks (Claude Desktop, VS Code, Windsurf). See the [MCP guide](mcp-proxy-guide.md).
+
+```bash
+leash mcp wrap [APP...] [--only SERVER] [--dry-run]   # route servers through Leash (backs up the config)
+leash mcp unwrap [APP...]                             # restore original commands
+leash mcp status [--json]                             # apps, servers, held-back tools
+leash mcp trust SERVER [--client APP] [--tool NAME] [--yes]   # accept changed or flagged tools
+leash mcp run [--client APP] [--name NAME] -- <server command>   # what wrapped configs run
+```
+
+`APP` is `claude-desktop`, `vscode` or `windsurf`; default is every detected app. Remote (`url`) servers are skipped. `trust` shows each tool's old and new description and needs a terminal unless `--yes`; agents can't run it. `run --server URL` checks calls with a Leash server instead (the old `leash-mcp-proxy`).
 
 ## leash init
 

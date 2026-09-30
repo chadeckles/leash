@@ -23,7 +23,7 @@ change meaning.
 | Field | Type | Meaning |
 |---|---|---|
 | `ts` | string | ISO 8601 UTC timestamp (milliseconds) |
-| `host` | string | Agent family: `claude-code`, `copilot`, `cursor`, `codex`, `openclaw` |
+| `host` | string | Agent family: `claude-code`, `copilot`, `cursor`, `codex`, `openclaw`, or `mcp` for the MCP proxy |
 | `agent` | string | Agent name the policy matched on (`$LEASH_AGENT`, else `host`) |
 | `session` | string | Agent session ID, when the agent provides one |
 | `cwd` | string | Working directory of the call |
@@ -33,10 +33,14 @@ change meaning.
 | `reason` | string | Plain-English reason from the matching rule |
 | `policy` | string | Name of the policy that decided (e.g. `coding-agent`, `my-rules`) |
 | `rule` | string | The `action` pattern of the rule that decided (e.g. `file.*`) |
-| `group` | string | Protection group of the rule (`tamper`, `secrets`, `destructive`, `risky`, `outside_workspace`, `network`); absent for your own rules |
+| `group` | string | Protection group of the rule (`tamper`, `secrets`, `destructive`, `production`, `risky`, `untrusted`, `outside_workspace`, `network`); absent for your own rules |
 | `ms` | number | Time taken to decide, in milliseconds |
 | `call` | string | First action of the tool call, when it differs from `request` (optional; e.g. a multi-command shell line) |
 | `observations` | array | `{request, observation}` entries from `monitor` rules that matched without deciding (optional) |
+| `mcp_client` | string | MCP proxy only: the app, e.g. `claude-desktop`, `vscode` |
+| `mcp_server` | string | MCP proxy only: the server's name in the app's config |
+| `approved` | boolean | MCP proxy only: your answer when Leash asked through the app |
+| `mcp_withheld` | boolean | MCP proxy only: `true` when a tool was hidden because its description changed or looked suspicious |
 | `prev` | string | SHA-256 of the previous line |
 | `hash` | string | SHA-256 of this record; `leash audit verify` checks the chain |
 

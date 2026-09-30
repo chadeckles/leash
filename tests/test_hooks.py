@@ -384,17 +384,33 @@ def test_cli_install_policy_test_and_presets(home, monkeypatch, capsys):
 # ── OpenClaw plugin ────────────────────────────────────────────────────────
 
 FAKE_OPENCLAW = """#!{python}
-import json, os, sys
+import json, os, shutil, sys
 home = os.environ["HOME"]
 cfg = os.path.join(home, ".openclaw", "openclaw.json")
 os.makedirs(os.path.dirname(cfg), exist_ok=True)
 with open(os.path.join(home, "openclaw-calls.log"), "a") as fh:
     fh.write(" ".join(sys.argv[1:]) + "\\n")
 args = sys.argv[1:]
+copy = os.path.join(home, ".openclaw", "extensions", "leash")
 if args[:3] == ["plugins", "install", "--link"]:
+    if "--force" in args:  # like OpenClaw >= 2026.6
+        sys.exit("error: --force is not supported with --link")
+    if os.environ.get("FAKE_OC_SCANNER"):  # like OpenClaw 2026.3
+        sys.exit('Plugin "leash" installation blocked: dangerous code patterns detected')
     open(cfg, "w").write(json.dumps({{"plugins": {{"load": {{"paths": [args[3]]}}}}}}))
+elif args[:2] == ["plugins", "install"] and "--dangerously-force-unsafe-install" in args:
+    if os.path.exists(copy):
+        sys.exit("plugin already exists (delete it first)")
+    shutil.copytree(args[2], copy)
+    # like 2026.3: a copy's record says source "path" and names the source dir
+    record = {{"source": "path", "sourcePath": args[2], "installPath": copy}}
+    open(cfg, "w").write(json.dumps({{"plugins": {{"installs": {{"leash": record}}}}}}))
 elif args[:2] == ["plugins", "uninstall"]:
+    if open(cfg).read() in ("", "{{}}"):
+        sys.exit("Plugin not found: leash")
     open(cfg, "w").write("{{}}")
+    if not os.environ.get("FAKE_OC_SCANNER"):  # 2026.3 leaves copies behind
+        shutil.rmtree(copy, ignore_errors=True)
 """
 
 
@@ -450,6 +466,38 @@ def test_openclaw_install_lifecycle(home, monkeypatch, fake_openclaw):
     assert cli_local._ensure_policies(["openclaw"]) == []
 
 
+def test_openclaw_install_scanner_fallback(home, monkeypatch, fake_openclaw):
+    """OpenClaw 2026.3 refuses to link plugins that start a process; Leash asks
+    before installing a copy with OpenClaw's override flag."""
+    from leash.hooks import openclaw
+
+    monkeypatch.setenv("FAKE_OC_SCANNER", "1")
+    asked: list[str] = []
+    r = inst.install("openclaw", confirm=lambda q: asked.append(q) or False)
+    assert r.action == "partial" and asked and "leash hook openclaw" in asked[0]
+    assert any("--dangerously-force-unsafe-install" in n for n in r.notes) and not openclaw.is_installed()
+    assert inst.install("openclaw").action == "partial"  # non-interactive: never agrees on its own
+
+    r = inst.install("openclaw", confirm=lambda q: True)
+    assert r.action == "updated" and openclaw.is_copied() and openclaw.is_installed(), r.notes
+    assert not openclaw.is_linked()  # the copy's record names the source dir; that isn't a link
+    assert inst.install("openclaw").action == "unchanged"
+    # A Leash upgrade that changes the plugin refreshes the copy without asking again
+    (openclaw.copied_dir() / "index.js").write_text("// old")
+    assert inst.install("openclaw").action == "updated"
+    assert (openclaw.copied_dir() / "index.js").read_text() == (openclaw.plugin_dir() / "index.js").read_text()
+    assert inst.uninstall("openclaw").action == "removed"
+    assert not openclaw.copied_dir().exists() and not openclaw.is_registered()
+    # A stray copy OpenClaw no longer tracks is still cleaned up; others' folders never are
+    inst.install("openclaw", confirm=lambda q: True)
+    openclaw.config_file().write_text("{}")
+    assert inst.uninstall("openclaw").action == "removed" and not openclaw.copied_dir().exists()
+    other = openclaw.copied_dir()
+    other.mkdir(parents=True)
+    (other / "index.js").write_text("// someone else's plugin")
+    assert not openclaw.remove_copy() and other.exists()
+
+
 @pytest.mark.skipif(not __import__("shutil").which("node"), reason="node not installed")
 def test_openclaw_plugin_js_maps_verdicts(home, tmp_path):
     import subprocess
@@ -478,6 +526,7 @@ console.log(JSON.stringify(out));
     assert "ls" not in out  # allow → undefined → no opinion
     assert out["rm"]["block"] is True and "home directory" in out["rm"]["blockReason"]
     assert out["cron"]["requireApproval"]["allowedDecisions"] == ["allow-once", "deny"]
+    assert out["cron"]["requireApproval"]["timeoutBehavior"] == "deny"
     assert out["missing"]["decision"] == "deny" and "fail-closed" in out["missing"]["reason"]
 
 

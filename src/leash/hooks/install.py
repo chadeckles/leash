@@ -26,7 +26,7 @@ import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from leash import paths
 from leash.hooks.hosts import HOSTS
@@ -301,10 +301,13 @@ def install(
     project_dir: Optional[Path] = None,
     command: Optional[str] = None,
     dry_run: bool = False,
+    confirm: Optional[Callable[[str], bool]] = None,
 ) -> Result:
+    """Hook Leash into ``host``. ``confirm`` is asked before any step that
+    needs the user's consent (today: OpenClaw's unsafe-install override)."""
     target = target_for(host, scope, project_dir)
     if host == "openclaw":
-        return _install_openclaw(target, command, dry_run)
+        return _install_openclaw(target, command, dry_run, confirm)
     cmd = hook_command(host, scope, command)
     existing = _read(target.path)
     doc = render(target, cmd, existing)
@@ -350,44 +353,76 @@ def uninstall(
     return Result(target, "removed", backup)
 
 
-def _install_openclaw(target: Target, command: Optional[str], dry_run: bool) -> Result:
+SCANNER_PROMPT = """\
+OpenClaw's install-time safety scan flagged the Leash plugin because it starts
+another program. That program is `leash hook openclaw`: it's how Leash checks
+each tool call, so the plugin can't work without it. You can read the whole
+plugin (about 130 lines) here: {index}
+
+This OpenClaw version won't *link* plugins that do this, but it will install a
+copy if you pass its --dangerously-force-unsafe-install flag. Install the copy?"""
+
+
+def _install_openclaw(target: Target, command: Optional[str], dry_run: bool,
+                      confirm: Optional[Callable[[str], bool]] = None) -> Result:
     from leash.hooks import openclaw
 
     argv = hook_argv("openclaw", command)
     fresh = not target.path.exists()
     files_ok = openclaw.files_current(argv)
-    linked = openclaw.is_linked()
-    link = openclaw.link_commands()
-    manual = [f"Link it into OpenClaw: {openclaw.shell_line(c)}" for c in link]
-    manual += [f"Then enable it: {openclaw.shell_line(c)}" for c in openclaw.enable_commands()]
-    if files_ok and linked:
+    linked, copied = openclaw.is_linked(), openclaw.is_copied()
+    copy_ok = copied and openclaw.files_current(argv, openclaw.copied_dir())
+    link, copy_cmd = openclaw.link_commands(), openclaw.copy_install_commands()
+    if files_ok and (linked or copy_ok):
         return Result(target, "unchanged")
     action = "installed" if fresh else "updated"
     if dry_run:
         content = f"write plugin files: {', '.join(openclaw.rendered_files(argv))}\n"
-        if not linked:
+        if not (linked or copied):
             content += "".join(f"run: {openclaw.shell_line(c)}\n" for c in link)
         return Result(target, action, content=content)
     if not files_ok:
         openclaw.write_files(argv)
     notes: List[str] = []
-    if not linked:
-        if openclaw.cli_available():
-            ok, err = openclaw.run_cli(link)
+    if not openclaw.cli_available() and not linked:
+        notes.append("The `openclaw` command isn't on PATH, so the plugin isn't linked yet.")
+        notes += [f"Link it into OpenClaw: {openclaw.shell_line(c)}" for c in link]
+        notes += [f"Then enable it: {openclaw.shell_line(c)}" for c in openclaw.enable_commands()]
+        return Result(target, "partial", notes=notes)
+    if copied:
+        # A copy doesn't follow changes to ~/.leash. The user already agreed to
+        # the copy install, so refresh it (OpenClaw won't overwrite in place).
+        ok, err = openclaw.unregister()
+        if ok:
+            ok, err = openclaw.run_cli(copy_cmd)
+        if not ok:
+            notes.append(f"Couldn't refresh the copy of the plugin in OpenClaw ({err}). Run: "
+                         + "; ".join(openclaw.shell_line(c) for c in openclaw.unlink_commands() + copy_cmd))
+            return Result(target, "partial", notes=notes)
+    elif not linked:
+        ok, err = openclaw.run_cli(link)
+        if not ok and not openclaw.scanner_blocked(err):
+            notes.append(f"`openclaw plugins install` failed: {err}")
+            notes += [f"Link it into OpenClaw: {openclaw.shell_line(c)}" for c in link]
+            return Result(target, "partial", notes=notes)
+        if not ok:
+            if not (confirm and confirm(SCANNER_PROMPT.format(index=openclaw.plugin_dir() / "index.js"))):
+                notes.append("OpenClaw's install scan blocked linking the plugin (it starts `leash hook openclaw`).")
+                notes.append(f"Install a copy instead: {openclaw.shell_line(copy_cmd[0])}")
+                notes.append("Or re-run: leash install openclaw --yes")
+                return Result(target, "partial", notes=notes)
+            ok, err = openclaw.run_cli(copy_cmd)
             if not ok:
                 notes.append(f"`openclaw plugins install` failed: {err}")
-                notes += manual
                 return Result(target, "partial", notes=notes)
-            # Linked plugins may also need enabling; not fatal if this OpenClaw
-            # version enables them on install or lacks the subcommand.
-            ok, err = openclaw.run_cli(openclaw.enable_commands())
-            if not ok:
-                notes.append("Couldn't enable the plugin automatically. If `openclaw plugins list` shows it "
-                             "disabled, run: " + openclaw.shell_line(openclaw.enable_commands()[0]))
-        else:
-            notes.append("The `openclaw` command isn't on PATH, so the plugin isn't linked yet.")
-            notes += manual
-            return Result(target, "partial", notes=notes)
+            notes.append(f"Installed a copy in {openclaw.copied_dir()}; re-run `leash install openclaw` after upgrading Leash.")
+    if not linked or copied:
+        # Plugins may also need enabling; not fatal if this OpenClaw version
+        # enables them on install or lacks the subcommand.
+        ok, _ = openclaw.run_cli(openclaw.enable_commands())
+        if not ok:
+            notes.append("Couldn't enable the plugin automatically. If `openclaw plugins list` shows it "
+                         "disabled, run: " + openclaw.shell_line(openclaw.enable_commands()[0]))
     notes.append("Restart OpenClaw (or run `openclaw plugins reload leash`) so the plugin loads.")
     notes.append("When Leash asks for approval, OpenClaw pauses the tool call; approve it with /approve or the approval button.")
     return Result(target, action, notes=notes)
@@ -396,14 +431,14 @@ def _install_openclaw(target: Target, command: Optional[str], dry_run: bool) -> 
 def _uninstall_openclaw(target: Target, dry_run: bool) -> Result:
     from leash.hooks import openclaw
 
-    linked = openclaw.is_linked()
-    if not linked and not target.path.exists():
+    registered = openclaw.is_registered()
+    if not registered and not target.path.exists():
         return Result(target, "absent")
     if dry_run:
         return Result(target, "removed")
     notes: List[str] = []
-    if linked:
-        ok, err = openclaw.run_cli(openclaw.unlink_commands())
+    if registered:
+        ok, err = openclaw.unregister()
         if not ok:
             notes.append(f"Couldn't unlink the plugin automatically ({err}). Run: "
                          + "; ".join(openclaw.shell_line(c) for c in openclaw.unlink_commands()))

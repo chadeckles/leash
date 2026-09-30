@@ -1068,10 +1068,9 @@ def cmd_doctor(args: argparse.Namespace) -> None:
             _check(f"hook_{r['host']}", "warn", f"Could not read {r['path']}: {r['error']}", "medium")
     from leash.hooks import openclaw as openclaw_hook
 
-    if (openclaw_hook.plugin_dir() / "index.js").is_file() and not openclaw_hook.is_linked():
+    if (openclaw_hook.plugin_dir() / "index.js").is_file() and not openclaw_hook.is_registered():
         _check("hook_openclaw", "warn",
-               "The Leash plugin for OpenClaw isn't linked into OpenClaw yet — run: "
-               + openclaw_hook.shell_line(openclaw_hook.link_commands()[0]), "medium")
+               "The Leash plugin for OpenClaw isn't active in OpenClaw yet — run: leash install openclaw", "medium")
     if hooked:
         _check("hooks", "pass", "Hooks installed: " + ", ".join(f"{r['host']} ({r['scope']})" for r in hooked))
     else:
@@ -1452,6 +1451,8 @@ def main() -> None:
                         help="Write repo-level hook config (commit it) instead of user-level")
     inst_p.add_argument("--command", dest="hook_command", help="Override the hook command (advanced)")
     inst_p.add_argument("--dry-run", action="store_true", help="Show what would be written")
+    inst_p.add_argument("--yes", "-y", action="store_true",
+                        help="Agree to prompts (e.g. installing a copy when OpenClaw's install scan blocks linking)")
 
     uninst_p = sub.add_parser("uninstall", help="Remove Leash hooks from coding agents")
     uninst_p.add_argument("hosts", nargs="*", type=agent_name, metavar="AGENT", help=f"Agents to unhook ({', '.join(HOST_CHOICES)}); default: all")

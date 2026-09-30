@@ -25,12 +25,19 @@ That's the whole setup. There's no server and no agent registration.
 ### What `leash install openclaw` does
 
 1. Copies a small, dependency-free plugin to `~/.leash/integrations/openclaw/`.
-2. Links and enables it with OpenClaw's own CLI: `openclaw plugins install --link ~/.leash/integrations/openclaw --force`, then `openclaw plugins enable leash`. Leash never edits `openclaw.json` itself.
+2. Links and enables it with OpenClaw's own CLI: `openclaw plugins install --link ~/.leash/integrations/openclaw`, then `openclaw plugins enable leash`. Leash never edits `openclaw.json` itself.
 3. Installs `~/.leash/policies/openclaw.yaml`. If you had the old server-era OpenClaw preset, it's backed up to `~/.leash/backups/` first.
 
-If the `openclaw` command isn't on your PATH, Leash still writes the plugin and prints the exact `openclaw plugins install --link …` command to run later. `leash doctor` warns you until the plugin is linked.
+If the `openclaw` command isn't on your PATH, Leash still writes the plugin and prints the exact `openclaw plugins install --link …` command to run later. `leash doctor` warns you until the plugin is active.
 
-To remove it, run `leash uninstall openclaw`. This unlinks the plugin through the OpenClaw CLI and deletes the plugin files.
+### "Dangerous code patterns detected"
+
+Some OpenClaw versions (such as 2026.3) scan plugins when you install them and won't *link* any plugin that starts another program. Leash's plugin has to start one: `leash hook openclaw`, which checks each tool call. When this happens, `leash install openclaw` explains it and asks before installing a **copy** of the plugin with OpenClaw's own `--dangerously-force-unsafe-install` flag. Read the plugin first if you like; it's about 130 lines in `~/.leash/integrations/openclaw/index.js`. Newer OpenClaw versions don't scan, so linking just works.
+
+- The copy lives in `~/.openclaw/extensions/leash`. Re-run `leash install openclaw` after upgrading Leash to refresh it.
+- In scripts, `leash install openclaw --yes` agrees to the prompt. Without a terminal, Leash never agrees on its own; it prints the command instead.
+
+To remove it, run `leash uninstall openclaw`. This removes the plugin through the OpenClaw CLI (linked or copied) and deletes the plugin files.
 
 ## How it works
 
@@ -129,10 +136,13 @@ Not sure what your assistant calls? Run it for a while with `LEASH_MODE=observe`
 
 | Symptom | Fix |
 |---|---|
-| `leash doctor`: *plugin files exist but aren't linked* | Run the `openclaw plugins install --link …` command it prints, then restart OpenClaw. |
+| `leash doctor`: *the plugin isn't active in OpenClaw yet* | Run `leash install openclaw`, then restart OpenClaw. |
 | Every tool call is blocked with *"Blocked by Leash (fail-closed): …"* | The plugin can't run `leash`. Check that `leash --version` works for the user OpenClaw runs as, then re-run `leash install openclaw` (it records the full path to `leash`). |
-| Nothing shows up in `leash audit tail` | Check `openclaw plugins inspect leash --runtime` and make sure OpenClaw was restarted after installing. |
-| A config using `$include` isn't detected as linked | `leash doctor` searches `openclaw.json` for the plugin path. If you split your config, verify with `openclaw plugins inspect leash`. |
+| Nothing shows up in `leash audit tail` | Check `openclaw plugins inspect leash` (add `--runtime` on newer OpenClaw to list its hooks) and make sure OpenClaw was restarted after installing. |
+| A config using `$include` isn't detected as linked | `leash doctor` reads `plugins.load.paths` in `openclaw.json`. If you split your config, verify with `openclaw plugins inspect leash`. |
+| OpenClaw says *plugins.allow is empty; discovered non-bundled plugins may auto-load* | A general OpenClaw hardening tip, not a Leash problem. If you set `plugins.allow`, OpenClaw adds `leash` to it when Leash installs the plugin. Leash never creates the list for you, because that would switch off your other plugins. |
+| `plugins inspect` says the plugin *is hook-only* | Expected. Leash only needs the `before_tool_call` hook; OpenClaw lists this as a supported plugin shape. |
+| On OpenClaw 2026.3, the plugin still loads after uninstalling it | That version's `plugins uninstall` leaves copy installs in `~/.openclaw/extensions/leash`. `leash uninstall openclaw` deletes that folder for you (only if it holds Leash's plugin). |
 
 ## Advanced: server and SDK
 

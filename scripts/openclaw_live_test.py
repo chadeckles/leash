@@ -1,25 +1,30 @@
 #!/usr/bin/env python3
 """Live end-to-end test: Leash guarding a real OpenClaw install.
 
-    python3 scripts/openclaw_live_test.py            # run, then delete the sandbox
-    python3 scripts/openclaw_live_test.py --keep     # keep the sandbox to poke around
+    python3 scripts/openclaw_live_test.py                      # use the openclaw on your PATH
+    python3 scripts/openclaw_live_test.py --keep               # keep the sandbox to poke around
+    python3 scripts/openclaw_live_test.py --install-openclaw   # no OpenClaw yet: npm-install one into the sandbox
 
 Everything happens inside a throwaway temporary directory:
 
 * HOME, ~/.leash and ~/.openclaw all point into the sandbox, so your real
   config, keys and policies are never read or touched.
-* Leash goes into a sandbox venv; OpenClaw into a sandbox npm prefix.
+* Leash goes into a sandbox venv. By default the test drives the OpenClaw you
+  already have (its config and state are redirected into the sandbox, so your
+  real setup isn't read or changed); --install-openclaw npm-installs one into
+  the sandbox instead.
 * The "model" is a scripted fake OpenAI-compatible server on 127.0.0.1, so no
   API key is needed and nothing is sent to an AI provider. Provider API keys
   are removed from the environment for the same reason.
-* The only network traffic is pip/npm downloading packages.
+* The only network traffic is pip (and npm with --install-openclaw).
 * The "secrets" the scenarios try to steal are fake files in the sandbox.
 
-Requires python3 >= 3.10, node >= 22 and npm. Overrides (environment variables):
-OPENCLAW_VERSION (default: latest), LEASH_SPEC (pip spec; default: this repo),
-OPENCLAW_BIN (use an existing openclaw binary instead of installing one; its
-state is still isolated in the sandbox), OPENCLAW_AGENT_ARGS (e.g. "agent exec
---json"), SCENARIO_TIMEOUT (seconds, default 180).
+Requires Python 3.11+ (like Leash) and a working OpenClaw. Leash itself adds no
+Node requirement: its plugin uses only Node built-ins, so whatever Node your
+OpenClaw runs on is fine. Overrides (environment variables): OPENCLAW_BIN (which
+openclaw to use; default: the one on PATH), LEASH_SPEC (pip spec; default: this
+repo), OPENCLAW_AGENT_ARGS (default: "agent --local --json"), SCENARIO_TIMEOUT
+(seconds, default 180).
 
 At the end it prints a summary and writes openclaw-live-test-report.txt in the
 current directory. That report is what to send back.
@@ -181,36 +186,46 @@ def audit_entries(home: Path) -> list[dict]:
     return [json.loads(line) for line in f.read_text().splitlines() if line.strip()]
 
 
-def need(tool: str, min_major: int | None = None) -> str | None:
-    exe = shutil.which(tool)
-    if not exe:
-        return f"`{tool}` not found on PATH"
-    if min_major:
-        _, out = run([exe, "--version"], dict(os.environ), 30)
-        try:
-            if int(out.lstrip("v").split(".")[0]) < min_major:
-                return f"{tool} {out} is too old (need {min_major}+)"
-        except ValueError:
-            pass
-    return None
-
-
 # ── main ────────────────────────────────────────────────────────────────────
+
+def oc_plugin_state(home: Path) -> tuple[bool, bool, bool]:
+    """(linked, copied, recorded) for the leash plugin in the sandbox OpenClaw."""
+    cfg_text = (home / ".openclaw" / "openclaw.json").read_text()
+    try:
+        plugins = json.loads(cfg_text).get("plugins") or {}
+    except ValueError:  # JSON5: fall back to text
+        return "integrations/openclaw" in cfg_text, False, '"leash"' in cfg_text
+    paths = (plugins.get("load") or {}).get("paths") or []
+    linked = any("integrations/openclaw" in str(p) for p in paths)
+    copied = (home / ".openclaw" / "extensions" / "leash" / "index.js").is_file()
+    recorded = "leash" in (plugins.get("installs") or {}) or "leash" in (plugins.get("entries") or {})
+    return linked, copied, recorded
+
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--keep", action="store_true", help="don't delete the sandbox at the end")
+    ap.add_argument("--install-openclaw", nargs="?", const="latest", metavar="VERSION",
+                    help="npm-install OpenClaw into the sandbox instead of using yours")
     args = ap.parse_args()
 
-    if sys.version_info < (3, 10):
-        print("Python 3.10+ required")
+    if sys.version_info < (3, 11):
+        print("Python 3.11+ required (same as Leash)")
         return 2
-    problems = [p for p in (need("node", 22), None if os.getenv("OPENCLAW_BIN") else need("npm")) if p]
-    if problems:
-        print("Missing prerequisites:\n  " + "\n  ".join(problems))
-        return 2
+    existing = None
+    if args.install_openclaw:
+        if not shutil.which("npm"):
+            print("--install-openclaw needs npm on PATH")
+            return 2
+    else:
+        existing = os.getenv("OPENCLAW_BIN") or shutil.which("openclaw")
+        if not existing or not Path(existing).expanduser().exists():
+            print("OpenClaw not found. Install it the usual way (https://docs.openclaw.ai), set OPENCLAW_BIN,\n"
+                  "or rerun with --install-openclaw to put a throwaway copy in the sandbox.")
+            return 2
 
-    sb = Path(tempfile.mkdtemp(prefix="leash-openclaw-test-"))
+    # resolve(): macOS /var is a symlink to /private/var; OpenClaw compares real paths
+    sb = Path(tempfile.mkdtemp(prefix="leash-openclaw-test-")).resolve()
     home, proj, npm = sb / "home", sb / "proj", sb / "npm"
     for d in (home / ".ssh", home / ".openclaw" / "credentials", proj, npm):
         d.mkdir(parents=True, exist_ok=True)
@@ -226,6 +241,9 @@ def main() -> int:
         "HOME": str(home), "USERPROFILE": str(home),
         "OPENCLAW_STATE_DIR": str(home / ".openclaw"), "OPENCLAW_WORKSPACE_DIR": str(proj),
         "OPENCLAW_TELEMETRY_ENDPOINT": "http://127.0.0.1:9/", "DO_NOT_TRACK": "1",
+        # A port nothing listens on, so the test can never reach a real OpenClaw gateway you have running.
+        "OPENCLAW_GATEWAY_PORT": "18997",
+        "NO_COLOR": "1", "FORCE_COLOR": "0",
         "npm_config_cache": str(sb / "npm-cache"), "npm_config_update_notifier": "false",
         "npm_config_fund": "false", "npm_config_audit": "false",
         "PATH": os.pathsep.join([str(sb / "venv" / "bin"), str(npm / "node_modules" / ".bin"), os.environ["PATH"]]),
@@ -234,7 +252,7 @@ def main() -> int:
     log("Leash × OpenClaw live test")
     log(f"sandbox: {sb}")
     log(f"os: {platform.platform()}  python: {platform.python_version()}")
-    log(f"node: {run(['node', '--version'], env, 30)[1]}  npm: {run(['npm', '--version'], env, 30)[1]}")
+    log(f"node on PATH: {run(['node', '--version'], env, 30)[1] or '-'}")
 
     server = None
     try:
@@ -248,16 +266,19 @@ def main() -> int:
         result("install leash", "PASS" if code == 0 else "FAIL", spec)
         if code != 0:
             return 1
-        if os.getenv("OPENCLAW_BIN"):
-            oc = Path(os.environ["OPENCLAW_BIN"]).expanduser().resolve()
-            result("install openclaw", "PASS" if oc.exists() else "FAIL", f"using existing {oc}")
+        if existing:
+            oc = Path(existing).expanduser().resolve()
+            log(f"using your OpenClaw: {oc} (state redirected to the sandbox)")
         else:
-            version = os.getenv("OPENCLAW_VERSION", "latest")
-            code, _ = step("npm", ["npm", "install", "--prefix", str(npm), f"openclaw@{version}"], env, 900)
+            version = args.install_openclaw
+            code, out = step("npm", ["npm", "install", "--prefix", str(npm), f"openclaw@{version}"], env, 900)
             oc = npm / "node_modules" / ".bin" / "openclaw"
-            result("install openclaw", "PASS" if code == 0 and oc.exists() else "FAIL", f"openclaw@{version}")
-        if not oc.exists():
-            return 1
+            detail = f"openclaw@{version}"
+            if code != 0 and "requires Node" in out:
+                detail += " refuses this Node version (OpenClaw's requirement, not Leash's); see the npm output above"
+            result("install openclaw", "PASS" if code == 0 and oc.exists() else "FAIL", detail)
+            if not oc.exists():
+                return 1
         env["PATH"] = os.pathsep.join([str(oc.parent), env["PATH"]])
         log(f"openclaw version: {run([str(oc), '--version'], env, 60)[1]}")
 
@@ -276,45 +297,56 @@ def main() -> int:
                             "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
                             "contextWindow": 128000, "maxTokens": 4096}]}}},
             "agents": {"defaults": {"model": {"primary": f"leash-fake/{MODEL}"}, "workspace": str(proj)}},
+            # Sandbox only: turn off OpenClaw's own exec approvals (they need a running
+            # gateway) so Leash is the only thing deciding what runs.
+            "tools": {"exec": {"security": "full", "ask": "off"}},
         }
         (home / ".openclaw" / "openclaw.json").write_text(json.dumps(cfg, indent=2))
+        (home / ".openclaw" / "exec-approvals.json").write_text(json.dumps(
+            {"version": 1, "defaults": {"security": "full", "ask": "off", "askFallback": "full"}}, indent=2))
+        copied = home / ".openclaw" / "extensions" / "leash"
 
         # 3. the thing under test: leash install openclaw
         log("\n== leash install openclaw ==")
-        code, out = step("leash install", ["leash", "install", "openclaw"], env, 300, cwd=proj)
-        linked = "integrations/openclaw" in (home / ".openclaw" / "openclaw.json").read_text()
-        result("leash install openclaw", "PASS" if code == 0 and linked else "FAIL",
-               "plugin linked in openclaw.json" if linked else "plugin NOT linked")
-        step("plugins list", [str(oc), "plugins", "list"], env, 120)
+        # --yes: agree to a copy install if this OpenClaw's install scan blocks linking.
+        code, out = step("leash install", ["leash", "install", "openclaw", "--yes"], env, 300, cwd=proj)
+        linked, is_copy, _ = oc_plugin_state(home)
+        how = "linked" if linked else ("installed as a copy (install scan)" if is_copy else "")
+        registered = code == 0 and bool(how)
+        result("leash install openclaw", "PASS" if registered else "FAIL",
+               f"plugin {how}" if how else "plugin NOT linked or installed")
+        # --runtime (lists registered hooks) only exists on newer OpenClaw; fall back to plain inspect.
         code, out = step("inspect", [str(oc), "plugins", "inspect", "leash", "--runtime", "--json"], env, 120)
-        hooks_ok = "before_tool_call" in out
-        result("plugin loads in OpenClaw", "PASS" if hooks_ok else ("UNKNOWN" if code == 0 else "FAIL"),
-               "registers before_tool_call" if hooks_ok else "inspect didn't show the hook (see output)")
+        if code != 0 and "unknown option" in out:
+            code, out = step("inspect", [str(oc), "plugins", "inspect", "leash", "--json"], env, 120)
+        if "before_tool_call" in out:
+            result("plugin loads in OpenClaw", "PASS", "registers before_tool_call")
+        elif code == 0 and '"loaded"' in out:
+            result("plugin loads in OpenClaw", "PASS", "status loaded (this OpenClaw can't list hooks; scenarios prove it)")
+        else:
+            result("plugin loads in OpenClaw", "FAIL" if code else "UNKNOWN", "see inspect output above")
         step("doctor", ["leash", "doctor"], env, 120, cwd=proj)
 
         # 4. scenarios, driven through OpenClaw's headless agent
-        agent_args = shlex.split(os.getenv("OPENCLAW_AGENT_ARGS", ""))
-        if not agent_args:
-            probe, _ = run([str(oc), "agent", "exec", "--help"], env, 60)
-            agent_args = ["agent", "exec", "--json"] if probe == 0 else ["agent", "--local", "--json"]
+        # `agent --local` runs one embedded turn; the workspace comes from the config written above.
+        agent_args = shlex.split(os.getenv("OPENCLAW_AGENT_ARGS", "agent --local --json"))
         log(f"\n== Scenarios (via `openclaw {' '.join(agent_args)}`) ==")
         timeout = int(os.getenv("SCENARIO_TIMEOUT", "180"))
         leash_json = home / ".leash" / "integrations" / "openclaw" / "leash.json"
 
         for name, (tool, _, value, desc) in SCENARIOS.items():
             before_audit, before_events = len(audit_entries(home)), len(FakeModel.events)
-            original = leash_json.read_text() if name == "fail_closed" and leash_json.exists() else None
-            if original is not None:
-                leash_json.write_text(json.dumps({"command": ["/nonexistent/leash", "hook", "openclaw"]}))
+            broken = [f for f in (leash_json, copied / "leash.json") if name == "fail_closed" and f.exists()]
+            originals = {f: f.read_text() for f in broken}
+            for f in broken:
+                f.write_text(json.dumps({"command": ["/nonexistent/leash", "hook", "openclaw"]}))
             try:
                 msg = f"scenario:{name} (Leash live test: {desc})"
-                cmd = [str(oc), *agent_args, "--message", msg]
-                if agent_args[:2] == ["agent", "exec"]:
-                    cmd += ["--cwd", str(proj)]
+                cmd = [str(oc), *agent_args, "--session-id", f"leash-live-{name}", "--message", msg]
                 code, out = step(name, cmd, env, timeout, cwd=proj)
             finally:
-                if original is not None:
-                    leash_json.write_text(original)
+                for f, text in originals.items():
+                    f.write_text(text)
             new_audit = audit_entries(home)[before_audit:]
             events = FakeModel.events[before_events:]
             tool_out = "\n".join(r for e in events for r in e["tool_results"])
@@ -325,7 +357,9 @@ def main() -> int:
             if tool_out:
                 log("      tool result seen by model:\n" + tail(tool_out, 6))
 
-            if not events:
+            if not registered:
+                result(name, "INCONCLUSIVE", "the Leash plugin isn't installed in OpenClaw, so this tests nothing")
+            elif not events:
                 result(name, "INCONCLUSIVE", "OpenClaw never called the fake model (check config/flags above)")
             elif tool not in offered:
                 result(name, "INCONCLUSIVE", f"OpenClaw didn't offer a `{tool}` tool to the model")
@@ -352,10 +386,14 @@ def main() -> int:
         step("verify", ["leash", "audit", "verify"], env, 60, cwd=proj)
         step("explain", ["leash", "explain"], env, 60, cwd=proj)
         code, _ = step("uninstall", ["leash", "uninstall", "openclaw"], env, 300, cwd=proj)
-        gone = "integrations/openclaw" not in (home / ".openclaw" / "openclaw.json").read_text()
-        result("leash uninstall openclaw", "PASS" if code == 0 and gone else "FAIL",
-               "plugin unlinked" if gone else "plugin still listed in openclaw.json")
-        step("plugins list", [str(oc), "plugins", "list"], env, 120)
+        left = [what for what, there in zip(("load path", "copied files", "config record"),
+                                            oc_plugin_state(home)) if there]
+        gone = not left
+        if not registered:
+            result("leash uninstall openclaw", "INCONCLUSIVE", "nothing was installed to remove")
+        else:
+            result("leash uninstall openclaw", "PASS" if code == 0 and gone else "FAIL",
+                   "plugin removed from OpenClaw" if gone else "left behind: " + ", ".join(left))
     finally:
         if server:
             server.shutdown()

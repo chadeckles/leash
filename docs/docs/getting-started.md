@@ -33,6 +33,7 @@ This installs dependencies, starts the server, registers a demo agent, runs allo
 [4/6] Testing policy decisions...
   ✔ ALLOW  read_file    → Demo agent may read files
   ✔ ALLOW  summarize    → Demo agent may summarize content
+  ✔ ALLOW  write_file   → Demo agent may write output files
   ✘ DENY   delete_file  → Demo agent is not allowed to delete files
   ✘ DENY   send_email   → Default policy: no action is allowed unless explicitly permitted
 
@@ -78,6 +79,8 @@ curl -s -X POST http://localhost:8000/authorize \
 ```
 
 You'll get a `"decision": "deny"` — because no policy allows `read_file` for an agent named `my-agent`. That's deny-by-default working. (The built-in `demo_agent_policy` only matches agents with "demo" in the name.)
+
+Normal agent registration is open by default for local development. Registering admin-type agents (`agent_type` of `cli`, `admin`, or `ops`) requires an admin JWT or the `X-Leash-Admin-Key` header; the CLI reads the local `.keys/admin.key` automatically when you run `leash init` on the server host.
 
 ## Option 4: Docker
 

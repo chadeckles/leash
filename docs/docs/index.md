@@ -23,7 +23,8 @@ Your Agent ──▶ Leash ──▶ allow or deny
 - 🔗 **Every action is logged.** Hash-chained entries — deletions or tampering are detectable.
 - 🔍 **Scan before you deploy.** Discover an MCP server's tools, classify risk, and generate policies automatically.
 - 🪪 **Identity-bound.** Each agent has a JWT. It can only authorize its own actions.
-- 🧩 **Framework-agnostic.** Python SDK, MCP proxy, or plain REST — works with any agent.
+- 🔒 **Hardened by default.** Policy management and admin identities require the admin key; revoked tokens fail closed.
+- 🧩 **Framework-agnostic.** Python SDK, MCP proxy, OpenClaw plugin, or plain REST — works with any agent.
 
 ## Who It's For
 
@@ -39,6 +40,7 @@ Your Agent ──▶ Leash ──▶ allow or deny
 | Get running in 60 seconds | [Getting Started](getting-started.md) |
 | Write rules for my agent | [Write Your First Policy](write-your-first-policy.md) |
 | Govern my OpenClaw assistant | [OpenClaw Integration](openclaw-guide.md) |
+| Run a 10-minute hands-on demo | [OpenClaw Lab](openclaw-lab.md) |
 | Secure my MCP tools in Claude/Cursor | [MCP Proxy Guide](mcp-proxy-guide.md) |
 | Use the Python SDK in my code | [SDK Reference](sdk-reference.md) |
 | Use the CLI | [CLI Reference](cli-reference.md) |

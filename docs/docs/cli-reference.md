@@ -18,7 +18,7 @@ leash --help
 
 ## Global Options
 
-Every command accepts these flags:
+Global flags must appear before the subcommand (for example, `leash --url http://localhost:8000 agents list`):
 
 | Flag | Default | Description |
 |------|---------|-------------|
@@ -36,7 +36,7 @@ export LEASH_URL=http://my-leash:8000
 
 The CLI automatically registers a `cli-admin` agent and caches the token to `~/.leash/token.json` on first use. You don't need to run `init` unless you want a custom agent name.
 
-Registering the CLI's admin identity requires the server's **admin key**. When the CLI runs on the same host as the server it reads the key from `KEYS_DIR/admin.key` automatically. Otherwise, set `LEASH_ADMIN_KEY` (for Docker: `export LEASH_ADMIN_KEY=$(docker exec leash-server cat /app/.keys/admin.key)`).
+Registering the CLI's admin identity requires the server's **admin key**. When the CLI runs on the same host as the server it reads the key from `KEYS_DIR/admin.key` automatically (default: `.keys/admin.key`, created with mode `0600`). Otherwise, set `LEASH_ADMIN_KEY` (for Docker: `export LEASH_ADMIN_KEY=$(docker exec leash-server cat /app/.keys/admin.key)`).
 
 ---
 
@@ -84,7 +84,9 @@ Output includes which policies immediately apply and how many allow/deny rules t
 
 If an agent with that name already exists, the CLI shows a warning with the existing agent's details. Use `--force` to refresh its token, or `leash agents delete <name>` to remove and re-create it.
 
-**Token saved to:** `~/.leash/<agent-name>.json`
+Agent names that look like UUIDs are rejected, so a name cannot impersonate another agent's ID. Registering an agent with `--type cli`, `--type admin`, or `--type ops` requires an admin JWT or the `X-Leash-Admin-Key` header; `leash init` handles this for the CLI admin identity.
+
+**Token saved to:** `~/.leash/<agent-name>.json` (mode `0600`)
 
 ### agents list
 
@@ -114,7 +116,7 @@ leash agents list --type coding --limit 10
 ### agents show
 
 ```bash
-leash agents show <agent-id>
+leash agents show <agent-id-or-name>
 ```
 
 Displays name, ID, vendor, type, tags, creation time, and last seen.
@@ -138,7 +140,7 @@ Removes an agent. Accepts either the UUID or the exact agent name. Prompts for c
 Show every rule that applies to an agent:
 
 ```bash
-leash agents permissions <agent-id>
+leash agents permissions <agent-id-or-name>
 ```
 
 **Example output:**
@@ -166,6 +168,8 @@ Show all policies from YAML files and the database:
 leash policy list
 leash policy list --limit 100
 ```
+
+Managed policy create/list/update/delete operations require admin privileges when `LEASH_POLICY_REQUIRE_ADMIN=true` (the default). Non-admin agents may only create self-restricting managed policies: `mode: enforce`, deny-only rules, scoped exactly to their own `agent_id`; the server stores those names as `<agent_id>/<name>`.
 
 **Example output:**
 
@@ -296,14 +300,14 @@ Run a multi-check security scan on the audit log:
 leash audit scan
 leash audit scan --agent <agent-id>
 leash audit scan --window 1800        # 30 min window
-leash audit scan --limit 500
+leash audit scan --limit 100
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--agent` | — | Limit scan to one agent |
 | `--window` | 3600 | Time window in seconds |
-| `--limit` | 500 | Max entries to scan |
+| `--limit` | 100 | Max entries to scan |
 
 **Checks performed:**
 
@@ -441,7 +445,7 @@ leash scan --generate-policy --save-policy my-policy.yaml -- npx -y @mcp/server-
 **Generated policies use this strategy:**
 
 - 🔴 **High risk** (delete, exec, send) → `deny`
-- 🟡 **Medium risk** (write, network, filesystem read) → `deny` in `observe` mode
+- 🟡 **Medium risk** (write, network, filesystem read) → `deny` while the generated policy runs in `mode: observe`
 - 🟢 **Low risk** (get, search, info) → `allow`
 - ⚪ **Unknown** → `deny` (manual review required)
 - Catch-all `*` → `deny`
@@ -474,6 +478,22 @@ Shows real-time agent activity, authorize decisions, audit stats, and policy ove
 
 ## leash server
 
+### leash start
+
+Start the Leash server (wrapper around Uvicorn):
+
+```bash
+leash start
+leash start --host 127.0.0.1 --port 9000
+leash start --reload
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--host` | `0.0.0.0` | Bind address |
+| `--port, -p` | `8000` | Port |
+| `--reload` | — | Auto-reload on code changes (development) |
+
 ### server rotate-keys
 
 Rotate the server's RSA signing key pair. The old key is retained so existing JWTs and audit signatures remain verifiable during the transition.
@@ -492,7 +512,7 @@ After rotation:
 - **Existing JWTs** continue to work — the server falls back to the previous key during verification
 - **New JWTs** are signed with the new key
 - **Audit signatures** are verified against both current and previous keys
-- Agents will silently re-register when their old token eventually expires (SDK auto-refresh)
+- SDK agents auto-refresh expired/invalid tokens on the next 401. Revoked tokens fail closed with `LeashRevoked` and do **not** re-register.
 
 ---
 
@@ -502,14 +522,19 @@ Health-check your deployment for common issues:
 
 ```bash
 leash doctor
+leash doctor --json
 ```
 
 Checks:
 
 - Server reachability
 - Server key age (warns at 90+ days, suggests `leash server rotate-keys`)
-- Database connectivity
-- Policy loading
+- Stale agents
+- Policy overview/coverage where available
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Output machine-readable JSON |
 
 ---
 
@@ -517,7 +542,7 @@ Checks:
 
 ```bash
 # 1. Start Leash
-python3 -m uvicorn app.main:app --port 8000
+leash start --reload
 
 # 2. Initialize CLI (auto on first command, but explicit is clearer)
 leash init

@@ -1,0 +1,11 @@
+{
+  "name": "leash-gate",
+  "version": "0.1.0",
+  "description": "OpenClaw plugin that authorizes every tool call with Leash",
+  "type": "module",
+  "license": "Apache-2.0",
+  "openclaw": { "extensions": ["./index.ts"] },
+  "scripts": {
+    "test": "node --experimental-strip-types gate.test.ts"
+  }
+}

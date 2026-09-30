@@ -15,6 +15,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **SDK no longer bypasses revocation**: on a *revoked* token the SDK raises the new `LeashRevoked` instead of silently re-registering. Expired tokens still auto-refresh. Identity files are written with mode 0600.
 - **MCP proxy**: tool arguments are now evaluated. Every resource-like argument (`path`, `source`, `destination`, `paths[]`, …) is authorized, and the call is denied if any resource is denied, and scalar args are exposed as `arg.<name>` context. Previously `resource:` rules never applied to MCP calls. Tools whose description or schema changes mid-session are now **blocked** (`--on-tool-change block|warn`). The proxy identity is stored in `~/.leash/mcp_<name>.json` instead of the current directory.
 
+### Added
+- **OpenClaw `leash-gate` plugin** (`integrations/openclaw/leash-gate/`): a `before_tool_call` hook that authorizes every OpenClaw tool call with Leash, blocks denials with the policy reason, maps `command`/`path`/`url`/`query` to the Leash resource, and fails closed. Includes a Node test harness (`gate.test.ts`) that runs without OpenClaw.
+- **OpenClaw Lab** (`docs/docs/openclaw-lab.md`): a 10-minute hands-on walkthrough (3 allows, 3 denies, audit evidence, and a tamper demo) with presenter notes.
+
+### Documentation
+- README rewritten around the current workflow: source install, `leash start`, admin key, CLI cheat sheet, security model, configuration, and project layout.
+- Architecture: fixed JWT issuer (`leash-identity-service`), signature scheme (PKCS#1 v1.5), audit table name (`audit_log`), built-in chain patterns, policy merge/namespacing, and the endpoint table; added the admin-control model.
+- OpenClaw guide now uses the plugin as the primary integration and shows current `register` output. CLI, SDK, MCP proxy, getting-started, and policy guides updated for the security hardening changes.
+- Fixed an invalid rule-level `observe` example in `app/policies/openclaw.yaml`.
+
+### Fixed
+- MCP proxy `--on-deny empty` was accepted but ignored. Policy denials now return an empty, non-error tool result. Leash outages and tool-change blocks still return errors.
+- `leash doctor` orphan/coverage checks read fields that `/policies/overview` no longer returns, and requested more agents than `GET /agents` allows (limit 500 > 200), so they silently reported nothing. They now use the current schema and each agent's `/permissions` match.
+
 ### Changed
 - Removed the duplicate audit entry the MCP proxy wrote after every `/authorize`. `/authorize` audit entries now also record `context` when no `resource` is given.
 - The CLI sends the admin key when auto-registering its `cli` identity.

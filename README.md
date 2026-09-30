@@ -21,15 +21,39 @@ One `pip install`, one policy file, and your agent is on a leash.
 ## 🌟 Highlights
 
 - 🐕 **Deny by default** — nothing happens unless your policy says so
-- 📜 **YAML rules** — human-readable, version-controllable, git-diffable
-- 🔗 **Tamper-evident audit trail** — hash-chained and signed; deletions are detectable
+- 📜 **YAML rules** — human-readable, version-controllable, git-diffable, hot-reloaded
+- 🔗 **Tamper-evident audit trail** — every decision is RSA-signed and SHA-256 hash-chained; edits and deletions are detectable
 - 👀 **Observe mode** — shadow new rules in production before enforcing
 - 🔍 **Security scanner** — discover an MCP server's tools, classify risk, generate policies
-- 🧩 **Framework-agnostic** — Python SDK, MCP proxy, or plain REST
-- 🧠 **[OpenClaw ready](docs/docs/openclaw-guide.md)** — built-in policies for the popular open-source AI assistant
+- 🔒 **Hardened by default** — admin-only policy management, admin-key-gated admin agents, fail-closed revocation
+- 🧩 **Framework-agnostic** — Python SDK, MCP proxy, OpenClaw plugin, or plain REST
+- 🧠 **[OpenClaw ready](docs/docs/openclaw-guide.md)** — a `before_tool_call` plugin plus a built-in policy for the popular open-source AI assistant
 - 🛡️ **OWASP mapped** — rules and audit checks reference [OWASP ASI](https://owasp.org/www-project-agentic-security-initiative/) and [LLM Top 10](https://owasp.org/www-project-top-10-for-large-language-model-applications/) threat IDs
-- ⚡ **One dependency** — `pip install leash`. No Go, no Rust, no sidecar containers
-- 📖 **[Full documentation](docs/docs/index.md)** — getting started, policy writing guide, SDK reference, CLI reference, architecture
+- ⚡ **Pure Python** — `pip install leash`. No Go, no Rust, no sidecar containers
+
+## ⚙️ How It Works
+
+Before your agent runs a tool, it asks Leash *"can I do this?"*:
+
+```
+ Agent / MCP client / OpenClaw
+            │  POST /authorize  {agent_id, action, resource, context}  + JWT
+            ▼
+ ┌─────────────────────── Leash server ───────────────────────┐
+ │  Identity (RS256 JWT)  →  Policy engine (YAML + managed)   │
+ │                              │                             │
+ │                              ▼                             │
+ │            Audit log (signed, hash-chained, SQLite)        │
+ └──────────────────────────────┬─────────────────────────────┘
+            ▼
+     allow → tool runs          deny → tool never runs
+```
+
+1. **Identity** — each agent registers once and gets a UUID and a signed JWT.
+2. **Policy** — the engine matches the agent's *name* against policy `agents:` patterns, then the first matching rule by priority decides. No match → deny.
+3. **Audit** — every decision (allow, deny, observe-deny) is signed and linked to the previous entry's hash, so tampering breaks the chain.
+
+If Leash is unreachable, the SDK, MCP proxy, and OpenClaw plugin all **fail closed**.
 
 ## ⬇️ Installation
 
@@ -37,36 +61,46 @@ One `pip install`, one policy file, and your agent is on a leash.
 pip install leash
 ```
 
-Or run from source:
+Or from source (recommended if you want to edit the bundled policies):
 
 ```bash
 git clone https://github.com/chadeckles/leash.git && cd leash
-make quickstart    # installs deps, starts server, runs a demo
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .           # makes the `leash` command available
 ```
 
 Requires Python 3.11+ (macOS ships with 3.9 — run `brew install python@3.12` first if needed).
 
-> 💡 **Running from source?** Use `pip install -e .` to make the `leash` command available globally, or use `./leash` directly from the repo root. See the [getting started guide](docs/docs/getting-started.md) for details.
+Want to watch it work first? `make quickstart` installs dependencies, starts the server, registers a demo agent, and prints allow/deny decisions plus the audit trail.
 
-### Starting the Server
-
-After installing, start the server:
+## 🚀 Quickstart Workflow
 
 ```bash
-leash start              # start on port 8000
-leash start --reload     # auto-reload for development
-leash start --port 9000  # custom port
+# 1. Start the server (terminal 1)
+leash start                      # http://localhost:8000  (--port, --reload)
+
+# 2. Register an agent (terminal 2) — the name is what policies match on
+leash agents register --name openclaw-agent
+
+# 3. See what it may do, then test real decisions
+leash agents permissions openclaw-agent
+leash policy test --agent openclaw-agent -a read -a web_search -a exec
+
+# 4. Inspect the evidence
+leash audit log                  # ✔/✘ per decision
+leash audit scan                 # integrity, suspicious chains, deny storms, gaps
+leash dashboard                  # live terminal UI (web UI: /dashboard)
 ```
 
-Or from source: `make dev`
+The first CLI command auto-registers a `cli-admin` identity using the server's admin key (`.keys/admin.key`, or `LEASH_ADMIN_KEY`) and caches it in `~/.leash/token.json`. Agent identities are saved to `~/.leash/<name>.json` with `0600` permissions.
 
-## 🚀 Usage
+> 💡 **Deny by default.** Anything no policy allows is denied. That's the point — nothing runs unless your rules say so.
+
+## 🔌 Integrations
 
 ### Python SDK
 
-For developers building agents in Python (LangChain, CrewAI, or custom code). Add a few lines to your existing agent code — no separate config file needed — and every tool call is authorized and audited.
-
-Wrap individual functions with a decorator:
+For agents written in Python (LangChain, CrewAI, custom code):
 
 ```python
 from sdk import LeashAgent
@@ -81,25 +115,17 @@ with agent:
     read_inbox("user@example.com")   # Leash checks permission first
 ```
 
-The `name` is how policies find your agent — a policy with `agents: ["*email*"]` matches any agent with "email" in its name.
-
-Or wrap many tools at once with `guard()` — no need to decorate every function individually:
+Wrap many tools at once with `guard()` — works with plain callables and LangChain tools:
 
 ```python
-# Wrap a list of existing callables in one line:
 guarded = agent.guard([read_inbox, send_email, summarize, search])
-
-# Works with LangChain tools too:
-guarded = agent.guard(langchain_tools)
 ```
 
-If the action is denied, the function doesn't run. If Leash is unreachable, it denies by default (fail-closed).
-
-> 💡 **Deny by default.** These examples will be denied until you [write a policy](#-writing-rules) that allows the action. That's the point — nothing runs unless your rules say so.
+A denied call never runs (`LeashDenied` by default; see `on_deny`). If the server is unreachable, the SDK denies. Expired tokens refresh automatically; revoked tokens raise `LeashRevoked`. See the [SDK Reference](docs/docs/sdk-reference.md).
 
 ### MCP Proxy (Claude Desktop, Cursor, etc.)
 
-[MCP (Model Context Protocol)](https://modelcontextprotocol.io) is how AI tools like Claude Desktop and Cursor connect to external tool servers — but MCP has no built-in authorization. This proxy sits between the AI and the MCP server so every tool call is checked against your policies, with zero code changes to the server:
+[MCP](https://modelcontextprotocol.io) has no built-in authorization. The proxy sits between the client and any MCP server — no server changes:
 
 ```bash
 python -m sdk.mcp_proxy \
@@ -107,89 +133,154 @@ python -m sdk.mcp_proxy \
     -- npx -y @modelcontextprotocol/server-filesystem /data
 ```
 
-Every `tools/call` is authorized, logged, and checked for tool poisoning automatically. The proxy auto-discovers the server's tools on startup.
-
-See the [MCP Proxy Guide](docs/docs/mcp-proxy-guide.md) for Claude Desktop config, Cursor setup, and policy examples.
+Every `tools/call` is authorized. Resource-like arguments (`path`, `source`, `destination`, `paths[]`, …) are each checked against `resource:` rules, scalar arguments are available to conditions as `arg.<name>`, and tools whose description or schema changes mid-session are blocked (tool-poisoning defense). See the [MCP Proxy Guide](docs/docs/mcp-proxy-guide.md).
 
 ### OpenClaw
 
-[OpenClaw](https://github.com/openclaw/openclaw) is a popular open-source personal AI assistant. It can run shell commands, browse the web, and manage files — all of which Leash can govern. Leash ships with a built-in OpenClaw policy:
+[OpenClaw](https://github.com/openclaw/openclaw) can run shell commands, browse the web, and edit files. The [`leash-gate`](integrations/openclaw/leash-gate) plugin hooks OpenClaw's `before_tool_call` so **every** tool call is authorized by Leash, and denied calls are blocked with the policy's reason:
 
 ```bash
-# Register your OpenClaw agent
-leash agents register --name "openclaw-agent" --vendor openclaw
-
-# The built-in policy allows reads and web search, denies exec and browser.
-# Customize app/policies/openclaw.yaml to match your needs.
+leash agents register --name openclaw-agent
+openclaw plugins install --link ./integrations/openclaw/leash-gate --force
+openclaw plugins enable leash-gate
 ```
 
-See the full [OpenClaw Integration Guide](docs/docs/openclaw-guide.md) for setup, example policies, and tool mappings.
+The built-in [`openclaw.yaml`](app/policies/openclaw.yaml) policy allows reads, web search, and memory, and denies `exec`, `write`, `browser`, and other high-risk tools. See the [OpenClaw Integration Guide](docs/docs/openclaw-guide.md) or the hands-on **[OpenClaw Lab](docs/docs/openclaw-lab.md)**.
 
 ### REST API
 
-Any language — register once, check permission before each action:
+Any language — register once, then ask before each action:
 
 ```bash
-# Register an agent (returns agent_id + JWT token)
-curl -s -X POST http://localhost:8000/agents \
-  -H "Content-Type: application/json" \
-  -d '{"name": "my-agent"}'
+RESP=$(curl -s -X POST http://localhost:8000/agents \
+  -H "Content-Type: application/json" -d '{"name": "my-agent"}')
+AGENT_ID=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['agent_id'])")
+TOKEN=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
 
-# Authorize an action (use the token and agent_id from above)
 curl -s -X POST http://localhost:8000/authorize \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"agent_id": "'$AGENT_ID'", "action": "email.read"}'
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"agent_id": "'$AGENT_ID'", "action": "email.read", "resource": "inbox"}'
 ```
 
-Full interactive API docs at **http://localhost:8000/docs** once the server is running.
+Interactive API docs live at **http://localhost:8000/docs**.
 
 ## 📜 Writing Rules
 
-Rules live in `app/policies/*.yaml`. The server picks up changes automatically — no restart needed.
+Rules live in `app/policies/*.yaml` (or `POLICIES_DIR`) and are hot-reloaded — no restart needed.
 
 ```yaml
 name: email-agent
 priority: 10
+mode: enforce          # or "observe" to log would-be denials without blocking
 agents: ["*email*"]
 rules:
   - action: "email.read"
     effect: allow
     reason: "Agent may read emails"
 
+  - action: "email.send"
+    effect: allow
+    reason: "Agent may send, but slowly"
+    rate_limit: { max_calls: 10, window: 3600 }
+
   - action: "email.*"
     effect: deny
     reason: "Everything else is blocked"
 ```
 
-**How evaluation works:**
+- **`priority`** — higher is evaluated first. `default.yaml` (priority 0) is the catch-all deny; use 10+ for your policies.
+- **`agents`** — wildcard patterns matched against the agent's **name**. Entries shaped like UUIDs match only that exact `agent_id`.
+- **`rules`** — first match wins. Optional `resource`, `conditions` (ABAC on request `context`), `rate_limit`, and `owasp` tags.
 
-- **`priority`** — higher number = evaluated first. The built-in `default.yaml` is priority 0 (catch-all deny). Your policies should be 10+ to take precedence.
-- **`agents`** — wildcard patterns matched against the agent's name. `"*email*"` matches any agent with "email" in its name.
-- **Rules** — evaluated top-to-bottom within a policy. First match wins. No match anywhere = **denied**.
+Validate before you ship, and dry-run a candidate file against a real agent:
 
-**Don't guess at rules — observe first.** Deploy new policies in `mode: observe` to see what *would* be denied without actually blocking anything. Once you're confident, flip to `mode: enforce`. See [Write Your First Policy](docs/docs/write-your-first-policy.md) for the full scan-first workflow.
+```bash
+leash policy validate app/policies/
+leash policy test --agent my-agent -a email.send -f candidate.yaml
+```
 
-Rules also support rate limiting, ABAC conditions, and OWASP threat tags — see the [policy writing guide](docs/docs/write-your-first-policy.md).
+**Observe first.** Deploy new policies with `mode: observe`, review `leash audit log --decision observe_deny`, then flip to `enforce`. See [Write Your First Policy](docs/docs/write-your-first-policy.md).
+
+Policies can also be managed over the API (`/policies/managed`). By default only admin identities may create them; non-admin agents may only create self-restricting, deny-only policies scoped to themselves.
+
+## 🔗 Tamper-Evident Audit
+
+Every `/authorize` decision is written to the audit log with an RSA signature and the SHA-256 hash of the previous entry. Changing or deleting any entry breaks the chain for everything after it:
+
+```bash
+curl -s http://localhost:8000/verify/audit-chain
+# {"valid": true, "entries_checked": 42, "detail": "Hash chain intact across 42 entries."}
+
+leash audit scan                                   # 🔴 CRITICAL if the chain is broken
+leash audit export --since 24h > audit.jsonl       # SIEM-friendly JSONL
+```
+
+Stream events elsewhere as they happen with `LEASH_WEBHOOK_URL` (HTTP POST) or `LEASH_AUDIT_SINK` (append-only JSONL file).
+
+## 🔐 Security Model
+
+| Control | Default |
+|---|---|
+| Policy management (`/policies/managed`) | Admin only (`LEASH_POLICY_REQUIRE_ADMIN=true`) |
+| Registering `cli` / `admin` / `ops` agents | Requires admin JWT or `X-Leash-Admin-Key` |
+| Admin key | `LEASH_ADMIN_KEY`, else auto-generated at `KEYS_DIR/admin.key` (0600) |
+| Agent registration | Open; set `LEASH_REQUIRE_AUTH_REGISTER=true` to require admin |
+| Read endpoints (metrics, overview, export) | Open; set `LEASH_REQUIRE_AUTH_READ=true` for network-exposed deployments |
+| Token revocation | Deleted agents and key rotation revoke tokens; DB errors fail closed (503) |
+| Identity | One JWT per agent; an agent can only authorize its *own* `agent_id` |
+
+Rotate server keys with `leash server rotate-keys`. See [SECURITY.md](SECURITY.md) and [Architecture](docs/docs/architecture.md).
+
+### Configuration
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DATABASE_URL` | `sqlite:///<repo>/leash.db` | Database location |
+| `POLICIES_DIR` | `<repo>/app/policies` | YAML policy directory |
+| `KEYS_DIR` | `<repo>/.keys` | Server keys and `admin.key` |
+| `JWT_EXPIRATION_HOURS` | `168` | Agent token lifetime |
+| `LEASH_ADMIN_KEY` | auto-generated | Admin bootstrap key |
+| `LEASH_POLICY_REQUIRE_ADMIN` | `true` | Admin-only policy management |
+| `LEASH_REQUIRE_AUTH_REGISTER` | `false` | Require admin to register agents |
+| `LEASH_REQUIRE_AUTH_READ` | `false` | Require auth for read endpoints |
+| `LEASH_WEBHOOK_URL` / `LEASH_AUDIT_SINK` | — | Real-time audit export |
+| `LEASH_CORS_ORIGINS` | localhost:8000 | Allowed browser origins |
+| `LEASH_URL` | `http://localhost:8000` | Server URL used by the CLI |
 
 ## 🔍 CLI Cheat Sheet
 
 ```bash
-leash status                              # server health
-leash agents list                         # registered agents
-leash agents register --name "my-bot"     # register a new agent
-leash policy validate app/policies/       # lint your YAML rules
-leash audit scan                          # security scan (integrity, storms, shadows)
-leash scan -- npx -y @mcp/server-fs /data # scan an MCP server's tools
-leash dashboard                           # live terminal TUI
+leash start [--port 8000] [--reload]      # run the server
+leash status                              # server health + metrics
 leash doctor                              # health-check your deployment
+
+leash agents register --name my-bot       # register (token → ~/.leash/my-bot.json)
+leash agents list | show | permissions | delete <name-or-id>
+
+leash policy list                         # YAML + managed policies
+leash policy validate app/policies/       # lint YAML rules
+leash policy test --agent my-bot -a exec  # live decision (add -f file.yaml for dry-run)
+
+leash audit log [--decision deny]         # recent decisions
+leash audit summary                       # allow/deny stats
+leash audit scan                          # integrity, chains, deny storms, shadows, gaps
+leash audit export --since 24h            # JSONL export
+
+leash scan -- npx -y @modelcontextprotocol/server-filesystem /data   # MCP tool risk scan
+leash dashboard                           # live terminal UI
+leash server rotate-keys                  # rotate server signing keys
 ```
+
+Full details: [CLI Reference](docs/docs/cli-reference.md).
 
 ## 🐳 Docker
 
 ```bash
-make docker-up     # build + start on port 8000
+make docker-up     # build + start on 127.0.0.1:8000 (auth hardening enabled)
 make docker-down   # stop + remove volumes
+
+# Point the host CLI at the container's admin key:
+export LEASH_ADMIN_KEY=$(docker exec leash-server cat /app/.keys/admin.key)
 ```
 
 Images are published to [GHCR](https://ghcr.io/chadeckles/leash), multi-arch (amd64 + arm64), and signed with [cosign](https://github.com/sigstore/cosign).
@@ -197,19 +288,47 @@ Images are published to [GHCR](https://ghcr.io/chadeckles/leash), multi-arch (am
 ## 🏗️ Project Layout
 
 ```
-app/
-  policies/       ← your rules (edit these)
-  policy/         ← policy engine
-  audit/          ← hash-chained audit log
-  identity/       ← agent registration & JWT
-  core/           ← config, auth, crypto, DB
+app/                     ← Leash server (FastAPI)
+  main.py                ← app, /health, /metrics, /dashboard, /admin/*
+  routes/                ← /agents, /authorize, /policies, /audit, /scan, /verify
+  policies/              ← YAML rules (edit these) — default, demo, email, openclaw
+  policy/                ← policy engine + validator
+  audit/                 ← signed, hash-chained audit log, scans, export dispatch
+  identity/              ← agent registration, JWT issuance, key rotation
+  core/                  ← config, auth, crypto, database, metrics
+  models/                ← SQLAlchemy models (agents, policies, audit_log)
+  static/dashboard.html  ← web dashboard
 sdk/
-  client.py       ← Python SDK (LeashAgent)
-  cli.py          ← CLI
-  mcp_proxy.py    ← MCP authorization proxy
-  scanner.py      ← security surface scanner
-  dashboard.py    ← terminal TUI
-tests/            ← test suite
+  client.py              ← Python SDK (LeashAgent, LeashDenied, LeashRevoked)
+  cli.py                 ← `leash` CLI
+  mcp_proxy.py           ← MCP authorization proxy
+  scanner.py             ← MCP tool-surface scanner
+  dashboard.py           ← terminal dashboard
+integrations/
+  openclaw/leash-gate/   ← OpenClaw before_tool_call plugin
+docs/docs/               ← guides and references (MkDocs)
+scripts/                 ← quickstart + demo scripts
+tests/                   ← pytest suite
+```
+
+## 📖 Documentation
+
+| Guide | |
+|---|---|
+| [Getting Started](docs/docs/getting-started.md) | Install and first decisions |
+| [Write Your First Policy](docs/docs/write-your-first-policy.md) | Observe → scan → enforce workflow |
+| [OpenClaw Integration](docs/docs/openclaw-guide.md) · [OpenClaw Lab](docs/docs/openclaw-lab.md) | Govern an OpenClaw assistant |
+| [MCP Proxy Guide](docs/docs/mcp-proxy-guide.md) | Claude Desktop, Cursor, any MCP server |
+| [SDK Reference](docs/docs/sdk-reference.md) · [CLI Reference](docs/docs/cli-reference.md) | API details |
+| [Architecture](docs/docs/architecture.md) | How it works under the hood |
+
+## 🧪 Development
+
+```bash
+pip install -e ".[dev]"
+make test          # pytest
+make lint          # ruff
+make dev           # server with auto-reload
 ```
 
 ## ✍️ Author

@@ -59,12 +59,15 @@ LeashAgent(
 | `vendor` | `str` | `None` | Optional vendor label for fleet management |
 | `agent_type` | `str` | `None` | Optional type label for filtering |
 | `tags` | `list[str]` | `None` | Optional tags for grouping |
-| `token_file` | `str \| Path \| None` | `.leash_identity.json` | Where to cache the JWT. `None` = no caching |
+| `token_file` | `str \| Path \| None` | `.leash_identity.json` | Where to cache the JWT (written mode `0600`). `None` = no caching |
 | `auto_register` | `bool` | `True` | Auto-register with Leash on first use |
 | `fail_closed` | `bool` | `True` | **Deny** actions when Leash is unreachable |
 
 !!! warning "Always use fail_closed=True in production"
     Setting `fail_closed=False` means your agent will execute actions even when Leash is down. This is useful for development but dangerous in production.
+
+!!! note "Admin agent types"
+    Server-side hardening requires an admin JWT or `X-Leash-Admin-Key` to register or promote agents with `agent_type` of `cli`, `admin`, or `ops`. The SDK's automatic registration is intended for normal agent types such as `coding`, `research`, or `email`.
 
 ### connect()
 
@@ -78,14 +81,14 @@ Raises `ConnectionError` with a clear message if the server is unreachable.
 
 ### Automatic Token Refresh
 
-If a JWT expires or is revoked (e.g. after server key rotation), the SDK handles it transparently:
+If a JWT expires or is otherwise invalid (for example after key rotation), the SDK handles it transparently:
 
 1. An `authorize()` or `audit()` call returns **401**
 2. The SDK silently discards the old identity and cached token file
 3. Re-registers with the server to get a fresh JWT
 4. Retries the original request
 
-This means your agent code never has to worry about token lifecycle — it just works.
+Revoked tokens are different: the server fails closed, and the SDK raises `LeashRevoked` instead of re-registering. This prevents a deliberately revoked agent from minting itself a fresh identity.
 
 ### authorize()
 
@@ -108,7 +111,8 @@ Ask Leash for permission. Returns the full response:
     "matched_policy": "email-agent",
     "matched_rule": "email.read",
     "signature": "a1b2c3...",
-    "owasp": ["ASI02"]
+    "owasp": ["ASI02"],
+    "observation": None        # present when observe mode would have denied
 }
 ```
 
@@ -124,6 +128,14 @@ agent.audit(
 ```
 
 Log an action to the audit trail manually. The `@agent.tool` decorator does this automatically, but you can call it directly for custom flows.
+
+### get_audit_trail()
+
+```python
+agent.get_audit_trail(limit: int = 50) → dict
+```
+
+Retrieve recent audit entries for this agent.
 
 ### close()
 
@@ -284,7 +296,9 @@ with LeashAgent("http://localhost:8000", name="my-agent") as agent:
 
 ---
 
-## LeashDenied Exception
+## Exceptions
+
+### LeashDenied
 
 Raised when an action is denied (with `on_deny="raise"`):
 
@@ -300,6 +314,14 @@ except LeashDenied as e:
     print(e.matched_rule)    # "delete_file"
     print(e.response)        # full response dict
 ```
+
+### LeashRevoked
+
+```python
+from sdk import LeashRevoked
+```
+
+Raised when the server reports that the cached token was revoked. It subclasses `LeashDenied`; catch it separately if you want to alert an operator or delete the cached identity file. Expired tokens still auto-refresh, but revoked tokens do not.
 
 ---
 

@@ -62,9 +62,12 @@ git clone https://github.com/chadeckles/leash.git && cd leash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .           # makes the `leash` command available
 leash demo                 # 3 allows, 3 denies, audit log, tamper detection
+leash scan openclaw        # what can each OpenClaw tool do, and is it allowed?
 ```
 
 `leash demo` needs no server, config, or API keys. It starts a throwaway Leash in a temp directory, sends six real tool calls from an "OpenClaw" agent, shows each decision and reason, prints the hash-chained audit log, then edits one entry and shows the chain verification catch it. Add `--step` to pause between parts (great for presenting) or `--keep` to leave it running and open the dashboard.
+
+Then change `exec: deny` to `exec: allow` in [`app/policies/openclaw.yaml`](app/policies/openclaw.yaml) and run `leash demo` again — the shell command is now allowed and `leash scan openclaw` flags it as *high risk and allowed*. Change it back when you're done.
 
 Requires Python 3.11+ (macOS ships with 3.9 — run `brew install python@3.12` first if needed). `pip install leash` also works, but the PyPI release can lag behind `main`.
 
@@ -142,7 +145,7 @@ python3 integrations/openclaw/lab.py allow   # terminal 3: 3 allowed tool calls
 python3 integrations/openclaw/lab.py deny    # terminal 3: 3 blocked tool calls
 ```
 
-The built-in [`openclaw.yaml`](app/policies/openclaw.yaml) policy allows reads, web search, and memory, and denies `exec`, `write`, `browser`, and other high-risk tools. See the [OpenClaw Integration Guide](docs/docs/openclaw-guide.md) or the hands-on **[OpenClaw Lab](docs/docs/openclaw-lab.md)**.
+The built-in [`openclaw.yaml`](app/policies/openclaw.yaml) policy is a list of `tool: allow|deny` toggles: it allows reads, web search, and memory, and denies `exec`, `write`, `browser`, and other high-risk tools. Run `leash scan openclaw` to see every tool, its risk, and its current decision. See the [OpenClaw Integration Guide](docs/docs/openclaw-guide.md) or the hands-on **[OpenClaw Lab](docs/docs/openclaw-lab.md)**.
 
 ### REST API
 
@@ -164,6 +167,25 @@ Interactive API docs live at **http://localhost:8000/docs**.
 ## 📜 Writing Rules
 
 Rules live in `app/policies/*.yaml` (or `POLICIES_DIR`) and are hot-reloaded — no restart needed.
+
+**Simple format — flip `allow` / `deny`.** This is all `app/policies/openclaw.yaml` is:
+
+```yaml
+agent: openclaw          # which agent(s) this applies to (name contains "openclaw")
+
+tools:
+  read: allow            # 🟢 can read files in its workspace
+  write: deny            # 🔴 can create or overwrite any file it can reach
+  exec: deny             # 🔴 can run any shell command on your computer
+  browser: deny          # 🔴 can drive a real web browser
+  web_search: allow      # 🟢 can search the web
+
+everything_else: deny    # tools not listed above
+```
+
+Not sure what a tool does? `leash scan openclaw` lists every OpenClaw tool, what it can do, its risk, and what your policy currently decides. Misspell a tool and `leash policy validate` says *"did you mean 'exec'?"*.
+
+**Full format — for anything more.** Resources, conditions, rate limits, and observe mode use the full rule list (the simple format compiles into this; you can also add a `rules:` list to a simple file, and those rules run first):
 
 ```yaml
 name: email-agent
@@ -266,6 +288,7 @@ leash audit scan                          # integrity, chains, deny storms, shad
 leash audit verify                        # re-check the hash chain
 leash audit export --since 24h            # JSONL export
 
+leash scan openclaw                       # OpenClaw tools: what they do, risk, allowed?
 leash scan -- npx -y @modelcontextprotocol/server-filesystem /data   # MCP tool risk scan
 leash dashboard                           # live terminal UI
 leash server rotate-keys                  # rotate server signing keys
@@ -292,7 +315,7 @@ app/                     ← Leash server (FastAPI)
   main.py                ← app, /health, /metrics, /dashboard, /admin/*
   routes/                ← /agents, /authorize, /policies, /audit, /scan, /verify
   policies/              ← YAML rules (edit these) — default, demo, email, openclaw
-  policy/                ← policy engine + validator
+  policy/                ← policy engine, validator, simple toggle format, OpenClaw tool catalog
   audit/                 ← signed, hash-chained audit log, scans, export dispatch
   identity/              ← agent registration, JWT issuance, key rotation
   core/                  ← config, auth, crypto, database, metrics
@@ -303,6 +326,7 @@ sdk/
   cli.py                 ← `leash` CLI
   mcp_proxy.py           ← MCP authorization proxy
   scanner.py             ← MCP tool-surface scanner
+  scan_openclaw.py       ← `leash scan openclaw`
   dashboard.py           ← terminal dashboard
   demo.py                ← `leash demo` offline walkthrough
 integrations/

@@ -36,6 +36,21 @@ ACTIONS = [
 ]
 
 _POLICY_FILES = ("default.yaml", "openclaw.yaml")
+POLICY_FILE = Path(__file__).resolve().parent.parent / "app" / "policies" / "openclaw.yaml"
+
+
+def _policy_lines(tools: list[str]) -> list[str]:
+    """The `tool: allow|deny` lines from openclaw.yaml for the given tools."""
+    lines = POLICY_FILE.read_text().splitlines()
+    return [ln.split("#")[0].rstrip() for ln in lines
+            if any(ln.strip().startswith(f"{t}:") for t in tools)]
+
+
+def _display_path(p: Path) -> str:
+    try:
+        return str(p.relative_to(Path.cwd()))
+    except ValueError:
+        return str(p)
 
 
 class _Style:
@@ -135,7 +150,10 @@ def run_demo(*, step: bool = False, keep: bool = False, delay: float = 0.6,
         agent_id, token = reg.json()["agent_id"], reg.json()["token"]
         http.headers["Authorization"] = f"Bearer {token}"
         print(f"  ✔ Registered {s.bold}{AGENT_NAME}{s.reset}  {s.dim}(id {agent_id[:8]}…, signed JWT issued){s.reset}")
-        print(f"  Policy: {s.bold}openclaw-policy{s.reset}  {s.dim}(app/policies/openclaw.yaml — plain YAML){s.reset}")
+        print(f"\n  Its rules — one line per tool in {s.bold}{_display_path(POLICY_FILE)}{s.reset}:")
+        for ln in _policy_lines([a[0] for a in ACTIONS]):
+            color = s.green if ln.endswith("allow") else s.red
+            print(f"    {color}{ln.strip()}{s.reset}")
         pause()
 
         # ── 2. Six actions ──────────────────────────────────────────────
@@ -153,8 +171,6 @@ def run_demo(*, step: bool = False, keep: bool = False, delay: float = 0.6,
                 print(f"        {s.green}{s.bold}✔ ALLOW{s.reset}  {d['reason']}")
             else:
                 print(f"        {s.red}{s.bold}✘ DENY {s.reset}  {d['reason']}")
-            expected = "allow" if i <= 3 else "deny"
-            ok &= d["decision"] == expected
             if i == 3:
                 pause()
             elif i < 6 and not interactive and delay:
@@ -177,12 +193,14 @@ def run_demo(*, step: bool = False, keep: bool = False, delay: float = 0.6,
         pause()
 
         # ── 4. Tamper ───────────────────────────────────────────────────
-        header(4, "An attacker edits the log to hide the shell attempt")
+        header(4, "An attacker edits the log to cover their tracks")
         target = next(e for e in entries if e["action"].startswith("exec"))
+        old = target["policy_decision"]
+        new = "allow" if old == "deny" else "deny"
         with sqlite3.connect(server.db_path) as db:
-            db.execute("UPDATE audit_log SET policy_decision='allow' WHERE id=?", (target["id"],))
-        print(f"  {s.yellow}UPDATE audit_log SET policy_decision='allow' WHERE id={target['id']};{s.reset}")
-        print(f"  {s.dim}(entry #{target['id']}: exec … deny → allow){s.reset}\n")
+            db.execute("UPDATE audit_log SET policy_decision=? WHERE id=?", (new, target["id"]))
+        print(f"  {s.yellow}UPDATE audit_log SET policy_decision='{new}' WHERE id={target['id']};{s.reset}")
+        print(f"  {s.dim}(entry #{target['id']}: exec … {old} → {new}){s.reset}\n")
         chain = http.get("/verify/audit-chain").json()
         ok &= not chain["valid"]
         print(f"  Verify chain → {s.red}{s.bold}✘ BROKEN{s.reset}  {chain['detail']}")
@@ -192,10 +210,12 @@ def run_demo(*, step: bool = False, keep: bool = False, delay: float = 0.6,
         # ── Wrap-up ─────────────────────────────────────────────────────
         print(f"\n{s.bold}{s.cyan}━━ Recap {'━' * 52}{s.reset}\n")
         print("  • Identity: the agent got a signed token, not a shared API key")
-        print("  • Policy:   YAML rules decided allow/deny, with a reason for each")
+        print("  • Policy:   one allow/deny line per tool decided each call, with a reason")
         print("  • Audit:    every decision was signed and chained; tampering is detectable")
-        print(f"\n  {s.dim}Next: run it for real with `leash start`, or plug in OpenClaw —{s.reset}")
-        print(f"  {s.dim}https://github.com/chadeckles/leash/blob/main/docs/docs/openclaw-lab.md{s.reset}\n")
+        print(f"\n  {s.bold}Try it:{s.reset} change {s.bold}exec: deny{s.reset} to {s.bold}exec: allow{s.reset} in "
+              f"{_display_path(POLICY_FILE)}, then run {s.bold}leash demo{s.reset} again.")
+        print(f"  {s.bold}Learn:{s.reset}  {s.bold}leash scan openclaw{s.reset} explains all 22 OpenClaw tools and what your policy allows.")
+        print(f"  {s.dim}Real OpenClaw: https://github.com/chadeckles/leash/blob/main/docs/docs/openclaw-lab.md{s.reset}\n")
 
         if keep:
             print(f"  Server still running → {s.bold}{server.url}/dashboard{s.reset}  (Ctrl-C to quit)\n")

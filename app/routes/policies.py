@@ -20,6 +20,7 @@ from app.policy.schemas import (
     PolicyResponse,
     PolicyUpdateRequest,
 )
+from app.policy.simple import expand as expand_simple
 from app.policy.validator import validate_policy
 
 import yaml as _yaml
@@ -143,6 +144,9 @@ def create_policy(
             detail={"message": "Invalid policy YAML", "errors": ["Empty or non-mapping YAML document"]},
         )
     parsed.setdefault("name", body.name)
+    # Expand the simple `tools:` format first so the self-restriction check
+    # below sees the same rules the engine will evaluate.
+    parsed = expand_simple(parsed)
     yaml_errors = validate_policy(parsed)
     if yaml_errors:
         raise HTTPException(
@@ -228,6 +232,7 @@ def update_policy(
                 detail={"message": "Invalid policy YAML", "errors": ["Empty or non-mapping YAML document"]},
             )
         parsed.setdefault("name", p.name)
+        parsed = expand_simple(parsed)
         yaml_errors = validate_policy(parsed)
         if yaml_errors:
             raise HTTPException(

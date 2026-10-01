@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ## [Unreleased]
 
 ### Security
+- **Simple-format policies are expanded before the self-restriction check**, so a non-admin agent can't grant itself tools by submitting `tools: {exec: allow}` as a managed policy.
 - **Privilege escalation fixed**: any registered agent could create a managed policy granting itself `allow *`. `LEASH_POLICY_REQUIRE_ADMIN` now defaults to **on**. Non-admin agents may only create *self-restricting* policies (deny-only, enforce mode, scoped to their own `agent_id`), which keeps `LeashAgent.discover()` and MCP auto-discovery working.
 - **Self-declared admin fixed**: registering or PATCHing an agent with `agent_type` `cli`/`admin`/`ops` now requires an admin JWT or the new `X-Leash-Admin-Key` header. The key comes from `LEASH_ADMIN_KEY` or is auto-generated at `KEYS_DIR/admin.key` (0600). `LEASH_REQUIRE_AUTH_REGISTER=true` now requires that same admin credential, as its documentation already stated.
 - **Policy name squatting/shadowing fixed**: policies created by non-admins are stored as `<agent_id>/<name>`, so they can't override a YAML policy or pre-claim another agent's `discover()` name.
@@ -21,6 +22,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **`leash audit verify`**: checks the audit hash chain from the CLI and exits 1 if it is broken.
 - **`integrations/openclaw/lab.py`** (stdlib only): `setup` registers the agent, installs and enables `leash-gate`, and configures the gateway's mode and token in one idempotent step; `allow` / `deny` make three tool calls each through the gateway and report every decision. Each failure prints a one-line fix.
 - **OpenClaw Lab** (`docs/docs/openclaw-lab.md`): Part A is `leash demo`; Part B is the optional real-OpenClaw flow using `lab.py`, with a troubleshooting table and presenter notes.
+
+- **Simple policy format**: a policy can now be just `agent:` plus `tools:` with each tool set to `allow` or `deny`, and an optional `everything_else` (default `deny`). It compiles into the full rule format; any `rules:` you add run first. `leash policy validate` explains beginner mistakes, including typos (*did you mean 'exec'?*) and `yes`/`no` instead of `allow`/`deny`.
+- **OpenClaw tool catalog** (`app/policy/catalog.py`): a plain-English description, risk level, and default for each of OpenClaw's 22 built-in tools. Used for policy reasons, the scan, and the generated policy file.
+- **`leash scan openclaw`**: lists every OpenClaw tool, what it can do, its risk, and what your local policy decides, and flags risky tools that are allowed. Offline, with no server or OpenClaw needed. Supports `--agent-name`, `--format json`, and `--save-policy`.
+
+### Changed
+- `app/policies/openclaw.yaml` uses the simple format: one commented `allow`/`deny` line per tool. Decisions are unchanged, but reasons now read like `exec is blocked — it could run any shell command on your computer`. It now matches agents whose name contains `openclaw`; it no longer matches `*claw*`.
+- `leash demo` shows the six policy lines that decide the demo, and its recap suggests flipping `exec` and running `leash scan openclaw`. The demo no longer fails if you edit the policy.
 
 ### Removed
 - `scripts/quickstart.sh`. It force-killed whatever was on port 8000 and deleted `leash.db`; `leash demo` replaces it without touching your data.

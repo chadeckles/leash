@@ -39,6 +39,8 @@ If Leash is unreachable or returns an error, the plugin **blocks** the call (fai
 
 These are the default tools OpenClaw exposes — each one becomes a Leash action. Your instance may have additional tools from installed skills or plugins; use `leash audit scan` after observe mode to discover the full set.
 
+`leash scan openclaw` prints this catalog in plain English — what each tool *can* do, its risk, and whether your current policy allows it. It reads your local policy files and needs no server or OpenClaw install.
+
 | Category | Tools | Risk |
 |---|---|---|
 | **File I/O** | `read`, `write`, `edit`, `apply_patch` | 🟡 Medium |
@@ -94,7 +96,20 @@ The agent ID and token are saved automatically. Leash policies match on the **ag
 
 ### 3. Verify the built-in policy works
 
-Leash ships with an OpenClaw policy at `app/policies/openclaw.yaml`. It matches any agent with "openclaw" or "claw" in the name. Confirm it applied:
+Leash ships with an OpenClaw policy at `app/policies/openclaw.yaml`. It applies to any agent with "openclaw" in its name, and it is just one `allow`/`deny` line per tool:
+
+```yaml
+agent: openclaw
+
+tools:
+  read: allow           # 🟢 can read files in its workspace
+  exec: deny            # 🔴 can run any shell command on your computer
+  # ... one line for each of the 22 tools
+
+everything_else: deny   # tools not listed above
+```
+
+To change what OpenClaw may do, flip a value and save — Leash reloads it automatically. Confirm it applied:
 
 ```bash
 leash policy test --agent openclaw-agent -a read -a exec
@@ -142,8 +157,8 @@ Restart the gateway (`openclaw gateway run`) after enabling. The plugin reads th
 Each decision is logged by the gateway:
 
 ```
-🐕 Leash ALLOW read README.md [openclaw-policy/read] — OpenClaw may read files in the workspace
-🐕 Leash DENY  exec whoami [openclaw-policy/exec] — Shell execution is blocked — this is the highest-risk tool
+🐕 Leash ALLOW read README.md [openclaw-policy/read] — read is allowed — it can read files in its workspace
+🐕 Leash DENY  exec whoami [openclaw-policy/exec] — exec is blocked — it could run any shell command on your computer
 ```
 
 A denied call returns the reason to the model (and to `/tools/invoke` callers as HTTP 403 `tool_call_blocked`), so the assistant can tell the user *why* it couldn't act.
@@ -265,6 +280,8 @@ For the full scan-first walkthrough, see [Write Your First Policy](write-your-fi
 !!! info "How priority works"
     Policies are evaluated from **highest priority number to lowest**. The built-in `openclaw-policy` has `priority: 20`. To override it, set a higher number (e.g. `priority: 25`). Within a policy, rules are evaluated top-to-bottom — **first match wins**.
 
+The first three examples use the simple toggle format: list the tools you want, set each to `allow` or `deny`, and `everything_else: deny` blocks the rest. Leash fills in the reasons from its tool catalog. `name` and `priority` are optional; set `priority` above 20 to override the built-in policy.
+
 ### Read-only research agent
 
 Allow searching and reading, deny everything else:
@@ -272,23 +289,16 @@ Allow searching and reading, deny everything else:
 ```yaml
 name: openclaw-researcher
 priority: 25
-agents: ["*research*", "*openclaw*"]
-rules:
-  - action: "read"
-    effect: allow
-    reason: "May read workspace files"
-  - action: "web_search"
-    effect: allow
-    reason: "May search the web"
-  - action: "web_fetch"
-    effect: allow
-    reason: "May fetch web pages"
-  - action: "memory_*"
-    effect: allow
-    reason: "May use memory"
-  - action: "*"
-    effect: deny
-    reason: "Everything else is blocked"
+agent: ["*research*", "*openclaw*"]
+
+tools:
+  read: allow
+  web_search: allow
+  web_fetch: allow
+  memory_search: allow
+  memory_get: allow
+
+everything_else: deny
 ```
 
 ### Coding agent (read + write, no exec)
@@ -296,32 +306,18 @@ rules:
 ```yaml
 name: openclaw-coder
 priority: 25
-agents: ["*coder*", "*coding*"]
-rules:
-  - action: "read"
-    effect: allow
-    reason: "May read files"
-  - action: "write"
-    effect: allow
-    reason: "May write files"
-  - action: "edit"
-    effect: allow
-    reason: "May edit files"
-  - action: "apply_patch"
-    effect: allow
-    reason: "May apply patches"
-  - action: "web_search"
-    effect: allow
-    reason: "May search for docs"
-  - action: "exec"
-    effect: deny
-    reason: "No shell access"
-  - action: "browser"
-    effect: deny
-    reason: "No browser access"
-  - action: "*"
-    effect: deny
-    reason: "Everything else is blocked"
+agent: ["*coder*", "*coding*"]
+
+tools:
+  read: allow
+  write: allow
+  edit: allow
+  apply_patch: allow
+  web_search: allow
+  exec: deny
+  browser: deny
+
+everything_else: deny
 ```
 
 ### Messaging agent (WhatsApp, Telegram, Slack)
@@ -331,31 +327,21 @@ If your OpenClaw setup is primarily for messaging, you'll need to explicitly all
 ```yaml
 name: openclaw-messenger
 priority: 25
-agents: ["*openclaw*"]
-rules:
-  - action: "message"
-    effect: allow
-    reason: "May send messages to connected platforms"
-    rate_limit:
-      max_calls: 30
-      window: 60
-  - action: "read"
-    effect: allow
-    reason: "May read files for context"
-  - action: "web_search"
-    effect: allow
-    reason: "May search the web"
-  - action: "memory_*"
-    effect: allow
-    reason: "May use memory"
-  - action: "*"
-    effect: deny
-    reason: "Everything else is blocked"
+agent: openclaw
+
+tools:
+  message: allow
+  read: allow
+  web_search: allow
+  memory_search: allow
+  memory_get: allow
+
+everything_else: deny
 ```
 
 ### Full-trust agent with rate limits
 
-For your personal main session where you trust the agent but want audit logging and rate limits:
+For your personal main session where you trust the agent but want audit logging and custom rate limits. Custom rate limits, resources, and conditions need the full rule format:
 
 ```yaml
 name: openclaw-trusted

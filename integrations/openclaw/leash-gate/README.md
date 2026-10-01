@@ -9,7 +9,13 @@ An [OpenClaw](https://github.com/openclaw/openclaw) plugin that asks [Leash](../
 
 ## Install
 
-Requires a running Leash server and OpenClaw (Node 24.16+).
+Requires a running Leash server and OpenClaw (Node 24.16+). The easy way, from the repo root:
+
+```bash
+python3 integrations/openclaw/lab.py setup   # register, install, enable, configure the gateway
+```
+
+Or by hand:
 
 ```bash
 leash agents register --name openclaw-agent          # writes ~/.leash/openclaw-agent.json

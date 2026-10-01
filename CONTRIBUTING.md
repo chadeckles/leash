@@ -43,7 +43,7 @@ leash/
 │   └── dashboard.py        # Terminal TUI dashboard
 ├── tests/                  # pytest test suite
 ├── docs/                   # MkDocs documentation site
-└── scripts/                # Helper scripts (quickstart, etc.)
+└── scripts/                # Helper scripts
 ```
 
 ## Development Workflow

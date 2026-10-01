@@ -17,13 +17,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 - **OpenClaw `leash-gate` plugin** (`integrations/openclaw/leash-gate/`): a `before_tool_call` hook that authorizes every OpenClaw tool call with Leash, blocks denials with the policy reason, maps `command`/`path`/`url`/`query` to the Leash resource, and fails closed. Includes a Node test harness (`gate.test.ts`) that runs without OpenClaw.
-- **OpenClaw Lab** (`docs/docs/openclaw-lab.md`): a 10-minute hands-on walkthrough (3 allows, 3 denies, audit evidence, and a tamper demo) with presenter notes.
+- **`leash demo`**: a 60-second, fully offline walkthrough. It starts a throwaway server, runs 3 allowed and 3 denied OpenClaw tool calls with their reasons, prints the hash-chained audit log, then tampers with an entry and shows verification catch it. `--step` pauses between parts; `--keep` leaves the server running. `make quickstart` now runs it.
+- **`leash audit verify`**: checks the audit hash chain from the CLI and exits 1 if it is broken.
+- **`integrations/openclaw/lab.py`** (stdlib only): `setup` registers the agent, installs and enables `leash-gate`, and configures the gateway's mode and token in one idempotent step; `allow` / `deny` make three tool calls each through the gateway and report every decision. Each failure prints a one-line fix.
+- **OpenClaw Lab** (`docs/docs/openclaw-lab.md`): Part A is `leash demo`; Part B is the optional real-OpenClaw flow using `lab.py`, with a troubleshooting table and presenter notes.
+
+### Removed
+- `scripts/quickstart.sh`. It force-killed whatever was on port 8000 and deleted `leash.db`; `leash demo` replaces it without touching your data.
 
 ### Documentation
 - README rewritten around the current workflow: source install, `leash start`, admin key, CLI cheat sheet, security model, configuration, and project layout.
 - Architecture: fixed JWT issuer (`leash-identity-service`), signature scheme (PKCS#1 v1.5), audit table name (`audit_log`), built-in chain patterns, policy merge/namespacing, and the endpoint table; added the admin-control model.
 - OpenClaw guide now uses the plugin as the primary integration and shows current `register` output. CLI, SDK, MCP proxy, getting-started, and policy guides updated for the security hardening changes.
 - Fixed an invalid rule-level `observe` example in `app/policies/openclaw.yaml`.
+- `openclaw.yaml` deny reasons for `write`/`edit`/`apply_patch` now read "blocked by default" instead of asking the reader to uncomment a rule.
 
 ### Fixed
 - MCP proxy `--on-deny empty` was accepted but ignored. Policy denials now return an empty, non-error tool result. Leash outages and tool-change blocks still return errors.

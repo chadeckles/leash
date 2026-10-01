@@ -4,8 +4,9 @@
 # Local development
 # ---------------------------------------------------------------------------
 
-quickstart:
-	@bash scripts/quickstart.sh
+quickstart:  ## 60-second offline demo (run `pip install -e .` first)
+	@command -v leash >/dev/null || { echo "Install first: python3 -m venv .venv && source .venv/bin/activate && pip install -e ."; exit 1; }
+	@leash demo
 
 install:
 	pip3 install -r requirements.txt

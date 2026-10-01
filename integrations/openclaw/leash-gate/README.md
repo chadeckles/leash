@@ -3,8 +3,8 @@
 An [OpenClaw](https://github.com/openclaw/openclaw) plugin that asks [Leash](../../../README.md) before **every** tool call. It registers a `before_tool_call` hook, sends the tool name and main argument to `POST /authorize`, and blocks the call when Leash says no. Every decision lands in Leash's signed, hash-chained audit log.
 
 ```
-🐕 Leash ALLOW read README.md [openclaw-policy/read] — OpenClaw may read files in the workspace
-🐕 Leash DENY  exec whoami [openclaw-policy/exec] — Shell execution is blocked — this is the highest-risk tool
+🐕 Leash ALLOW read README.md [openclaw-policy/read] — read is allowed — it can read files in its workspace
+🐕 Leash DENY  exec whoami [openclaw-policy/exec] — exec is blocked — it could run any shell command on your computer
 ```
 
 ## Install

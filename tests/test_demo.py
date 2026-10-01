@@ -27,7 +27,7 @@ def test_leash_demo_runs_offline_end_to_end():
     assert out.count("✔ ALLOW") == 3
     assert out.count("✘ DENY") == 3
     assert "✔ VALID" in out and "✘ BROKEN" in out
-    assert "Shell execution is blocked" in out
+    assert "exec is blocked — it could run any shell command" in out
 
 
 def test_audit_verify_reports_valid_chain(client, monkeypatch, capsys):

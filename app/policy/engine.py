@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 from app.core.config import POLICIES_DIR
+from app.policy.simple import expand as expand_simple
 from app.core.security import sign_data
 from app.policy.schemas import (
     AuthorizeResponse,
@@ -82,7 +83,7 @@ def _load_yaml_policies() -> List[Dict[str, Any]]:
     for fpath in sorted(policy_path.glob("*.y*ml")):
         try:
             with open(fpath, "r") as f:
-                doc = yaml.safe_load(f)
+                doc = expand_simple(yaml.safe_load(f))
                 if doc:
                     doc["_source"] = "yaml"
                     policies.append(doc)
@@ -117,7 +118,7 @@ def _load_db_policies(db=None) -> List[Dict[str, Any]]:
     policies: List[Dict[str, Any]] = []
     for row in rows:
         try:
-            doc = yaml.safe_load(row.yaml_content)
+            doc = expand_simple(yaml.safe_load(row.yaml_content))
         except yaml.YAMLError as exc:
             _logger.warning(
                 "Skipping malformed managed policy id=%s (%s): %s",
@@ -500,7 +501,7 @@ def dry_run(req: DryRunRequest, db=None) -> DryRunResponse:
     The candidate policy is loaded from raw YAML, combined with existing
     on-disk policies, and evaluated normally for each requested action.
     """
-    candidate = yaml.safe_load(req.policy_yaml)
+    candidate = expand_simple(yaml.safe_load(req.policy_yaml))
     if not candidate:
         return DryRunResponse(
             agent_id=req.agent_id,

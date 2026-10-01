@@ -20,6 +20,8 @@ from typing import Any, Dict, List
 
 import yaml
 
+from app.policy.simple import expand, is_simple, lint
+
 
 # ── Known fields and their types ───────────────────────────────────────────
 
@@ -52,6 +54,12 @@ def validate_policy(doc: Dict[str, Any], source: str = "<inline>") -> List[str]:
 
     if not isinstance(doc, dict):
         return [f"{source}: expected a YAML mapping, got {type(doc).__name__}"]
+
+    if is_simple(doc):
+        simple_errors = lint(doc, source)
+        if simple_errors:
+            return simple_errors
+        doc = expand(doc)
 
     # ── Top-level required fields ──
     if "name" not in doc:

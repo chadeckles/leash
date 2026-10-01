@@ -178,7 +178,7 @@ Managed policy create/list/update/delete operations require admin privileges whe
   • default                        pri=  0  rules= 2  agents=[*]
   • demo_agent_policy               pri= 10  rules= 4  agents=[*demo*]
   • email-agent                    pri= 10  rules= 5  agents=[*email*, *mail*]
-  • openclaw-policy                pri= 20  rules=22  agents=[*openclaw*, *claw*]
+  • openclaw-policy                pri= 20  rules=23  agents=[*openclaw*]
 
   ── Managed Policies (from DB) ──
   • my-custom-policy               pri=  5  [active]  updated=2025-03-28 14:30
@@ -434,6 +434,21 @@ leash status
 ---
 
 ## leash scan
+
+Explain what an agent can do. `leash scan openclaw` explains OpenClaw's built-in tools; `leash scan -- <command>` scans any MCP server.
+
+### OpenClaw
+
+```bash
+leash scan openclaw                                   # every tool: risk, what it can do, allowed?
+leash scan openclaw --agent-name my-openclaw          # decisions for a differently named agent
+leash scan openclaw --format json                     # machine-readable
+leash scan openclaw --save-policy my-openclaw.yaml    # write your current settings as a toggle file
+```
+
+Reads the local policy files (`POLICIES_DIR`, default `app/policies/`) and Leash's built-in OpenClaw tool catalog. It needs no server and no OpenClaw install. Each tool shows a risk (🔴 high, 🟠 medium, 🟢 low), ✔ allow / ✘ deny / ◉ watch (observe mode), and a plain-English description; risky tools that are allowed are flagged **⚠ high risk and allowed**. Rules with `resource` or `conditions` are skipped because the answer depends on the request.
+
+### MCP servers
 
 Scan an MCP server's tool surface, classify risks, check policy coverage, and generate starter policies.
 

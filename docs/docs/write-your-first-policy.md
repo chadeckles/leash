@@ -2,6 +2,34 @@
 
 Policies are YAML files that tell Leash what an agent is allowed to do. This guide walks you through writing one from scratch — **starting with a scan of what the agent actually does.**
 
+## The Simple Format: flip allow / deny
+
+For most agents, a policy is a list of tools, each set to `allow` or `deny`:
+
+```yaml
+# app/policies/my_agent.yaml
+agent: my-agent          # applies to agents whose name contains "my-agent"
+
+tools:
+  read: allow
+  web_search: allow
+  exec: deny
+  write: deny
+
+everything_else: deny    # anything not listed (this is the default)
+```
+
+That's a complete policy. Save it in `app/policies/` and Leash picks it up immediately. For OpenClaw, Leash knows every built-in tool: run `leash scan openclaw` to see what each one can do and what your policy decides, and read [`app/policies/openclaw.yaml`](https://github.com/chadeckles/leash/blob/main/app/policies/openclaw.yaml) for a fully commented example.
+
+Simple-format rules:
+
+- Values must be `allow` or `deny`. `leash policy validate` catches anything else, including typos of OpenClaw tool names (*did you mean 'exec'?*).
+- `agent` is a name (matched as `*name*`), a glob such as `"*bot*"`, an agent ID, or a list of these.
+- Optional keys: `name` (default `<agent>-policy`), `priority` (default 20), `mode: observe`, `description`.
+- Need something the toggles can't express — resources, conditions, custom rate limits? Add a `rules:` list (the full format below). Those rules are checked first, then the toggles, then `everything_else`.
+
+Everything below describes the **full format**, which the simple format compiles into.
+
 ## The Scan-First Workflow
 
 !!! tip "Don't guess — scan first"

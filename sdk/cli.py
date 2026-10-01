@@ -571,7 +571,8 @@ def cmd_policy_list(args: argparse.Namespace) -> None:
         import yaml as _yaml
         for f in sorted(yaml_dir.glob("*.y*ml")):
             try:
-                doc = _yaml.safe_load(f.read_text())
+                from app.policy.simple import expand as _expand
+                doc = _expand(_yaml.safe_load(f.read_text()))
                 if doc:
                     yaml_policies.append({
                         "name": doc.get("name", f.stem),
@@ -999,9 +1000,25 @@ def cmd_scan(args: argparse.Namespace) -> None:
     if upstream and upstream[0] == "--":
         upstream = upstream[1:]
 
+    if args.upstream_cmd[:1] == ["openclaw"] or upstream == ["openclaw"]:
+        # REMAINDER swallows flags written after "openclaw"; parse them here.
+        extra = argparse.ArgumentParser(prog="leash scan openclaw")
+        extra.add_argument("--format", choices=["table", "json"], default=args.format)
+        extra.add_argument("--save-policy", metavar="FILE", default=args.save_policy)
+        extra.add_argument("--agent-name", default=args.agent_name)
+        extra_args = extra.parse_args(upstream[1:])
+        args.format, args.save_policy, args.agent_name = (
+            extra_args.format, extra_args.save_policy, extra_args.agent_name)
+        from sdk.scan_openclaw import scan_openclaw
+        sys.exit(scan_openclaw(
+            agent_name=args.agent_name or "openclaw-agent",
+            fmt=args.format, save_policy=args.save_policy,
+        ))
+
     if not upstream:
-        print("\n  ✘ No MCP server command provided.", file=sys.stderr)
-        print("  Usage: leash scan -- npx -y @modelcontextprotocol/server-filesystem /data\n", file=sys.stderr)
+        print("\n  ✘ Tell me what to scan.", file=sys.stderr)
+        print("  leash scan openclaw                     # what OpenClaw can do + what your policy allows", file=sys.stderr)
+        print("  leash scan -- <MCP server command>      # e.g. npx -y @modelcontextprotocol/server-filesystem /data\n", file=sys.stderr)
         sys.exit(1)
 
     # Step 1: Discover tools from the MCP server
@@ -1482,7 +1499,7 @@ def main() -> None:
     rotate_keys_p.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt")
 
     # ── scan ──
-    scan_p = sub.add_parser("scan", help="Scan an MCP server's tool surface for security risks")
+    scan_p = sub.add_parser("scan", help="Explain what an agent can do: `leash scan openclaw` or `leash scan -- <MCP server>`")
     scan_p.add_argument("--generate-policy", action="store_true", help="Generate a starter YAML policy from scan results")
     scan_p.add_argument("--save-policy", metavar="FILE", help="Write generated policy to a file (implies --generate-policy)")
     scan_p.add_argument("--format", choices=["table", "json"], default="table", help="Output format (default: table)")
@@ -1491,7 +1508,7 @@ def main() -> None:
     scan_p.add_argument("--policy-name", default="auto-scan-policy", help="Name for generated policy (default: auto-scan-policy)")
     scan_p.add_argument("--agent-pattern", default='"*"', help="Agent pattern in generated policy (default: \"*\")")
     scan_p.add_argument("--timeout", type=float, default=30.0, help="Timeout in seconds for MCP server connection (default: 30)")
-    scan_p.add_argument("upstream_cmd", nargs=argparse.REMAINDER, help="MCP server command (after --)")
+    scan_p.add_argument("upstream_cmd", nargs=argparse.REMAINDER, help="'openclaw', or an MCP server command after --")
 
     # ── dashboard ──
     dash = sub.add_parser("dashboard", help="Live terminal dashboard")

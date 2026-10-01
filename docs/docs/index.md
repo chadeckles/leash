@@ -40,7 +40,7 @@ Your Agent ──▶ Leash ──▶ allow or deny
 | Get running in 60 seconds | [Getting Started](getting-started.md) |
 | Write rules for my agent | [Write Your First Policy](write-your-first-policy.md) |
 | Govern my OpenClaw assistant | [OpenClaw Integration](openclaw-guide.md) |
-| Run a 10-minute hands-on demo | [OpenClaw Lab](openclaw-lab.md) |
+| Run the 60-second demo or the OpenClaw lab | [OpenClaw Lab](openclaw-lab.md) |
 | Secure my MCP tools in Claude/Cursor | [MCP Proxy Guide](mcp-proxy-guide.md) |
 | Use the Python SDK in my code | [SDK Reference](sdk-reference.md) |
 | Use the CLI | [CLI Reference](cli-reference.md) |
@@ -49,15 +49,11 @@ Your Agent ──▶ Leash ──▶ allow or deny
 ## Installation
 
 ```bash
-pip install leash
-leash start
-```
-
-Or from source:
-
-```bash
 git clone https://github.com/chadeckles/leash.git && cd leash
-make quickstart
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
+leash demo        # 60-second offline demo: allows, denies, audit log, tamper detection
+leash start       # run the real server on http://localhost:8000
 ```
 
 Requires Python 3.11+. See [Getting Started](getting-started.md) for Docker and step-by-step options.

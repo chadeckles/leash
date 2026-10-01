@@ -55,23 +55,18 @@ Before your agent runs a tool, it asks Leash *"can I do this?"*:
 
 If Leash is unreachable, the SDK, MCP proxy, and OpenClaw plugin all **fail closed**.
 
-## ⬇️ Installation
-
-```bash
-pip install leash
-```
-
-Or from source (recommended if you want to edit the bundled policies):
+## ⬇️ Install and see it work (60 seconds)
 
 ```bash
 git clone https://github.com/chadeckles/leash.git && cd leash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .           # makes the `leash` command available
+leash demo                 # 3 allows, 3 denies, audit log, tamper detection
 ```
 
-Requires Python 3.11+ (macOS ships with 3.9 — run `brew install python@3.12` first if needed).
+`leash demo` needs no server, config, or API keys. It starts a throwaway Leash in a temp directory, sends six real tool calls from an "OpenClaw" agent, shows each decision and reason, prints the hash-chained audit log, then edits one entry and shows the chain verification catch it. Add `--step` to pause between parts (great for presenting) or `--keep` to leave it running and open the dashboard.
 
-Want to watch it work first? `make quickstart` installs dependencies, starts the server, registers a demo agent, and prints allow/deny decisions plus the audit trail.
+Requires Python 3.11+ (macOS ships with 3.9 — run `brew install python@3.12` first if needed). `pip install leash` also works, but the PyPI release can lag behind `main`.
 
 ## 🚀 Quickstart Workflow
 
@@ -140,9 +135,11 @@ Every `tools/call` is authorized. Resource-like arguments (`path`, `source`, `de
 [OpenClaw](https://github.com/openclaw/openclaw) can run shell commands, browse the web, and edit files. The [`leash-gate`](integrations/openclaw/leash-gate) plugin hooks OpenClaw's `before_tool_call` so **every** tool call is authorized by Leash, and denied calls are blocked with the policy's reason:
 
 ```bash
-leash agents register --name openclaw-agent
-openclaw plugins install --link ./integrations/openclaw/leash-gate --force
-openclaw plugins enable leash-gate
+leash start                                  # terminal 1
+python3 integrations/openclaw/lab.py setup   # terminal 2: registers the agent, installs + enables the plugin, configures the gateway
+openclaw gateway run                         # terminal 2
+python3 integrations/openclaw/lab.py allow   # terminal 3: 3 allowed tool calls
+python3 integrations/openclaw/lab.py deny    # terminal 3: 3 blocked tool calls
 ```
 
 The built-in [`openclaw.yaml`](app/policies/openclaw.yaml) policy allows reads, web search, and memory, and denies `exec`, `write`, `browser`, and other high-risk tools. See the [OpenClaw Integration Guide](docs/docs/openclaw-guide.md) or the hands-on **[OpenClaw Lab](docs/docs/openclaw-lab.md)**.
@@ -211,6 +208,7 @@ Every `/authorize` decision is written to the audit log with an RSA signature an
 curl -s http://localhost:8000/verify/audit-chain
 # {"valid": true, "entries_checked": 42, "detail": "Hash chain intact across 42 entries."}
 
+leash audit verify                                 # ✔ VALID / ✘ BROKEN (exit 1)
 leash audit scan                                   # 🔴 CRITICAL if the chain is broken
 leash audit export --since 24h > audit.jsonl       # SIEM-friendly JSONL
 ```
@@ -251,6 +249,7 @@ Rotate server keys with `leash server rotate-keys`. See [SECURITY.md](SECURITY.m
 
 ```bash
 leash start [--port 8000] [--reload]      # run the server
+leash demo [--step] [--keep]              # 60-second offline demo
 leash status                              # server health + metrics
 leash doctor                              # health-check your deployment
 
@@ -264,6 +263,7 @@ leash policy test --agent my-bot -a exec  # live decision (add -f file.yaml for 
 leash audit log [--decision deny]         # recent decisions
 leash audit summary                       # allow/deny stats
 leash audit scan                          # integrity, chains, deny storms, shadows, gaps
+leash audit verify                        # re-check the hash chain
 leash audit export --since 24h            # JSONL export
 
 leash scan -- npx -y @modelcontextprotocol/server-filesystem /data   # MCP tool risk scan
@@ -304,10 +304,12 @@ sdk/
   mcp_proxy.py           ← MCP authorization proxy
   scanner.py             ← MCP tool-surface scanner
   dashboard.py           ← terminal dashboard
+  demo.py                ← `leash demo` offline walkthrough
 integrations/
   openclaw/leash-gate/   ← OpenClaw before_tool_call plugin
+  openclaw/lab.py        ← one-command OpenClaw setup + allow/deny lab
 docs/docs/               ← guides and references (MkDocs)
-scripts/                 ← quickstart + demo scripts
+scripts/                 ← helper scripts
 tests/                   ← pytest suite
 ```
 

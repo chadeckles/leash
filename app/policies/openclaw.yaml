@@ -33,17 +33,17 @@ rules:
 
   - action: "write"
     effect: deny
-    reason: "File writes are blocked — uncomment the allow rule below to enable"
+    reason: "File writes are blocked by default"
     # To allow writes, change effect to 'allow'. To shadow first, move the
     # rule into a separate policy with `mode: observe` (mode is policy-level).
 
   - action: "edit"
     effect: deny
-    reason: "File edits are blocked — uncomment to enable"
+    reason: "File edits are blocked by default"
 
   - action: "apply_patch"
     effect: deny
-    reason: "File patches are blocked — uncomment to enable"
+    reason: "File patches are blocked by default"
 
   # ── Shell execution ───────────────────────────────────────────────────
   - action: "exec"

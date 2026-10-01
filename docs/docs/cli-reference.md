@@ -392,6 +392,27 @@ Each exported event includes:
 
 ---
 
+### audit verify
+
+Re-check the audit log's hash chain. Exits `1` if any entry was edited or deleted.
+
+```bash
+leash audit verify
+#   ✔ Audit chain VALID — Hash chain intact across 42 entries.
+```
+
+## leash demo
+
+Run a 60-second, fully offline walkthrough. No server, config, or API keys needed.
+
+```bash
+leash demo           # run straight through (~10 seconds)
+leash demo --step    # pause before each part (for presenting)
+leash demo --keep    # leave the throwaway server running afterwards (dashboard link printed)
+```
+
+It starts a temporary Leash server (temp database and keys, random local port), registers `openclaw-agent`, sends three tool calls the `openclaw.yaml` policy allows and three it denies, prints the hash-chained audit log, then edits one audit entry directly in SQLite and shows `/verify/audit-chain` detect it. Everything is deleted when it exits.
+
 ## leash status
 
 Quick health check:

@@ -28,8 +28,10 @@ Usage::
     leash audit summary
     leash audit log --agent <id> --limit 20
     leash audit scan --agent <id>
+    leash audit verify                # detect tampering in the hash chain
 
     # System
+    leash demo                        # 60-second offline demo (no server needed)
     leash status
     leash dashboard
 
@@ -903,6 +905,23 @@ def cmd_audit_export(args: argparse.Namespace) -> None:
             print(line)
 
 
+def cmd_audit_verify(args: argparse.Namespace) -> None:
+    """Re-check the audit hash chain. Exits 1 if any entry was altered or removed."""
+    try:
+        resp = _get_client(args.url).get("/verify/audit-chain")
+        resp.raise_for_status()
+    except httpx.ConnectError:
+        print(f"Error: Cannot reach Leash at {args.url}. Start it with: leash start", file=sys.stderr)
+        sys.exit(1)
+    data = resp.json()
+    if data["valid"]:
+        print(f"\n  ✔ Audit chain VALID — {data['detail']}\n")
+        return
+    print(f"\n  ✘ Audit chain BROKEN — {data['detail']}\n")
+    print("  An entry at or just before that point was edited or deleted.\n")
+    sys.exit(1)
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # status
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1443,6 +1462,9 @@ def main() -> None:
     aexport.add_argument("--limit", type=int, default=10000, help="Max entries (default: 10000)")
     aexport.add_argument("--pretty", action="store_true", help="Pretty-print each JSON event (not pipe-friendly)")
 
+    # audit verify
+    audit_sub.add_parser("verify", help="Verify the audit log's hash chain (detects tampering)")
+
     # ── status ──
     sub.add_parser("status", help="Check Leash server health and metrics")
 
@@ -1475,6 +1497,11 @@ def main() -> None:
     dash = sub.add_parser("dashboard", help="Live terminal dashboard")
     dash.add_argument("--refresh", type=int, default=2, help="Refresh interval in seconds (default: 2)")
 
+    # ── demo ──
+    demo_p = sub.add_parser("demo", help="Run a 60-second offline demo: allow, deny, audit, tamper")
+    demo_p.add_argument("--step", action="store_true", help="Pause for Enter between sections (for presenting)")
+    demo_p.add_argument("--keep", action="store_true", help="Keep the demo server running afterwards to explore the dashboard")
+
     # ── doctor ──
     doc_p = sub.add_parser("doctor", help="Health-check your Leash deployment")
     doc_p.add_argument("--json", dest="json_out", action="store_true", help="Output results as JSON")
@@ -1489,7 +1516,7 @@ def main() -> None:
     elif args.command == "policy":
         {"list": cmd_policy_list, "validate": cmd_policy_validate, "test": cmd_policy_test}[args.policy_command](args)
     elif args.command == "audit":
-        {"summary": cmd_audit_summary, "log": cmd_audit_log, "scan": cmd_audit_scan, "export": cmd_audit_export}[args.audit_command](args)
+        {"summary": cmd_audit_summary, "log": cmd_audit_log, "scan": cmd_audit_scan, "export": cmd_audit_export, "verify": cmd_audit_verify}[args.audit_command](args)
     elif args.command == "status":
         cmd_status(args)
     elif args.command == "start":
@@ -1504,6 +1531,9 @@ def main() -> None:
         run_dashboard(url=args.url, token=token, refresh=args.refresh)
     elif args.command == "doctor":
         cmd_doctor(args)
+    elif args.command == "demo":
+        from sdk.demo import run_demo
+        sys.exit(run_demo(step=args.step, keep=args.keep))
 
 
 if __name__ == "__main__":

@@ -28,12 +28,12 @@ CONFIG = Path(os.getenv("OPENCLAW_CONFIG_PATH", Path.home() / ".openclaw" / "ope
 ALLOW_CALLS = [
     ("session_status", {}),
     ("sessions_list", {}),
-    ("read", {"path": "hello.txt"}),
+    ("memory_search", {"query": "Cyber Lab Night"}),
 ]
 DENY_CALLS = [
-    ("write", {"path": "pwned.txt", "content": "owned by the agent"}),
-    ("edit", {"path": "hello.txt", "oldText": "Hello", "newText": "Goodbye"}),
     ("browser", {"action": "open", "url": "https://example.com"}),
+    ("canvas", {"action": "present"}),
+    ("agents_list", {}),
 ]
 
 _tty = sys.stdout.isatty() and not os.getenv("NO_COLOR")
@@ -130,7 +130,8 @@ def setup() -> None:
         fail("OpenClaw is not installed", "npm install -g openclaw@latest   (needs Node 24+)")
     ok("OpenClaw is installed")
 
-    run(["openclaw", "plugins", "install", "--link", str(PLUGIN_DIR), "--force"],
+    run(["openclaw", "plugins", "install", "--link", str(PLUGIN_DIR), "--force",
+         "--accept-capabilities"],
         "Installed the leash-gate plugin", "Run `openclaw doctor`, then retry")
     run(["openclaw", "plugins", "enable", "leash-gate"],
         "Enabled the leash-gate plugin", "Run `openclaw doctor`, then retry")
@@ -151,11 +152,15 @@ def setup() -> None:
     else:
         ok("Gateway auth is configured")
 
+    if (cfg.get("tools") or {}).get("profile") != "full":
+        run(["openclaw", "config", "set", "tools.profile", "full"],
+            "Set tools.profile = full", "Run `openclaw configure`, then retry")
+    else:
+        ok("Tool profile is full")
+
     ws = workspace(openclaw_config())
     ws.mkdir(parents=True, exist_ok=True)
-    (ws / "hello.txt").write_text("Hello, Cyber Lab Night!\n")
-    (ws / "pwned.txt").unlink(missing_ok=True)
-    ok(f"Wrote {ws / 'hello.txt'}")
+    ok(f"OpenClaw workspace is ready at {ws}")
 
     print(f"""
   {BOLD}Done.{RESET} Next:
@@ -207,9 +212,6 @@ def invoke(calls: list[tuple[str, dict]], expect: str) -> None:
     word = "allowed" if expect == "allow" else "blocked by Leash"
     print(f"\n  {passed}/{len(calls)} {word}. "
           f"{DIM}The gateway terminal shows a 🐕 Leash line for each call.{RESET}")
-    if expect == "deny":
-        pwned = workspace(cfg) / "pwned.txt"
-        print(f"  {DIM}pwned.txt exists? {'YES ✘' if pwned.exists() else 'no — the write never ran'}{RESET}")
     print(f"  {DIM}See the evidence: leash audit log{RESET}\n")
     sys.exit(0 if passed == len(calls) else 1)
 

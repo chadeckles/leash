@@ -130,7 +130,7 @@ The built-in policy defaults:
 The plugin lives in this repo at `integrations/openclaw/leash-gate/`. It needs OpenClaw installed (`npm install -g openclaw@latest`, Node 24.16+) and onboarded (`openclaw onboard`).
 
 ```bash
-openclaw plugins install --link ./integrations/openclaw/leash-gate --force
+openclaw plugins install --link ./integrations/openclaw/leash-gate --force --accept-capabilities
 openclaw plugins enable leash-gate
 openclaw plugins inspect leash-gate --runtime --json   # confirm the before_tool_call hook is registered
 ```

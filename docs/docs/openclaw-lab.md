@@ -3,7 +3,7 @@
 Two parts, both copy-paste friendly:
 
 - **Part A: 60-second demo.** Python only, no OpenClaw. Shows 3 allows, 3 denies, the audit log, and tamper detection. **Start here.**
-- **Part B: real OpenClaw (optional, about 10 minutes).** The same allows and denies, but enforced inside a real OpenClaw gateway by the `leash-gate` plugin.
+- **Part B: real OpenClaw (optional, about 10 minutes).** The same authorization pattern, enforced inside a real OpenClaw gateway by the `leash-gate` plugin.
 
 Built for [Cyber Lab Night](https://lnkd.in/eteT72xp) — Colorado Springs, Oct 7.
 
@@ -74,15 +74,21 @@ Change `deny` to `allow`, save, and run `leash demo` again. Step 4 is now `✔ A
 
 ```bash
 npm install -g openclaw@latest
+openclaw --version
 ```
+
+OpenClaw is installed by npm, not into `.venv`; activating `.venv` makes the Leash CLI and Python helper available in the same shell.
 
 You'll use **three terminals**. In each new terminal, first `cd leash && source .venv/bin/activate`.
 
 **Terminal 1: start Leash** (leave it running)
 
 ```bash
-leash start
+rm -f /tmp/leash-openclaw-lab.db
+DATABASE_URL=sqlite:////tmp/leash-openclaw-lab.db leash start
 ```
+
+The temporary database gives the presentation a clean audit log without touching your normal `leash.db`.
 
 **Terminal 2: set up OpenClaw, then start its gateway** (leave it running)
 
@@ -91,7 +97,7 @@ python3 integrations/openclaw/lab.py setup
 openclaw gateway run
 ```
 
-`setup` does everything in one go, and is safe to re-run: registers `openclaw-agent` with Leash, installs and enables the `leash-gate` plugin, sets the gateway to local mode with a token, and puts a `hello.txt` in the OpenClaw workspace. Every step prints `✔` or `✘` with the exact fix.
+`setup` does everything in one go, and is safe to re-run: registers `openclaw-agent` with Leash, installs and enables the `leash-gate` plugin with capability consent, sets the gateway to local mode with a token, and selects the full tool profile used by the lab. Every step prints `✔` or `✘` with the exact fix.
 
 **Terminal 3: make tool calls**
 
@@ -103,17 +109,14 @@ python3 integrations/openclaw/lab.py deny
 ```
   ✔ ALLOWED  session_status
   ✔ ALLOWED  sessions_list
-  ✔ ALLOWED  read hello.txt
-             tool ran → "Hello, Cyber Lab Night!"
+  ✔ ALLOWED  memory_search Cyber Lab Night
 
-  ✘ BLOCKED  write pwned.txt
-             Leash: write is blocked — it could create or overwrite any file it can reach
-  ✘ BLOCKED  edit hello.txt
-             Leash: edit is blocked — it could change the contents of existing files
   ✘ BLOCKED  browser https://example.com
              Leash: browser is blocked — it could drive a real web browser: click, type, and use sites you are logged in to
-
-  pwned.txt exists? no — the write never ran
+  ✘ BLOCKED  canvas present
+             Leash: canvas is blocked — it could draw interactive pages on your screen and paired devices
+  ✘ BLOCKED  agents_list
+             Leash: Not listed under tools:, so it is denied by default
 ```
 
 Terminal 2 prints a `🐕 Leash ALLOW` or `🐕 Leash DENY` line for each call.
@@ -133,13 +136,13 @@ leash audit verify     # ✔ Audit chain VALID
 | `✘ OpenClaw is not installed` | `npm install -g openclaw@latest`, then open a new terminal |
 | `✘ The gateway rejected our token (HTTP 401)` | Stop the gateway (Ctrl+C) and run `openclaw gateway run` again so it picks up the token `setup` wrote |
 | `✘ Can't reach the OpenClaw gateway` | Start it in terminal 2: `openclaw gateway run` |
-| `? SKIPPED` (tool profile doesn't expose it) | Your OpenClaw profile hides that tool. The other calls still prove the point. |
+| `? SKIPPED` (tool profile doesn't expose it) | Re-run `python3 integrations/openclaw/lab.py setup`, then restart the gateway. |
 | `Gateway start blocked: … gateway.mode` | Re-run `python3 integrations/openclaw/lab.py setup` |
 | `python3: command not found` or a `SyntaxError` | Python is older than 3.11; see Part A |
 
 ### Try it yourself
 
-- **Allow writes**: in `app/policies/openclaw.yaml`, change `write: deny` to `write: allow` and save (Leash reloads it automatically). Re-run `lab.py deny`: the write now succeeds. Change it back afterwards.
+- **Block memory search**: in `app/policies/openclaw.yaml`, change `memory_search: allow` to `memory_search: deny` and save (Leash reloads it automatically). Re-run `lab.py allow`: memory search is now blocked. Change it back afterwards.
 - **Check your work**: `leash scan openclaw` shows every tool's current decision and flags risky allows.
 - **Go further**: scoping to a folder (`resource: "notes/*"`) or watching before blocking (`mode: observe`) uses the full rule format. See [Write Your First Policy](write-your-first-policy.md).
 
@@ -164,5 +167,7 @@ Use **Part A** on stage. It has no network, API keys, or Node dependency. Run Pa
 **Before the event**
 
 - [ ] On the demo laptop, run Part A from a fresh clone, with Wi-Fi off after `pip install`
-- [ ] If showing Part B: run it end to end once, then leave terminals 1 and 2 running
+- [ ] If showing Part B: confirm `openclaw --version`, run it end to end once, then restart Terminal 1 with the clean temporary database
+- [ ] Start the OpenClaw gateway before presenting and leave terminals 1 and 2 running
+- [ ] Restore any policy switches you changed during rehearsal
 - [ ] Increase terminal font size

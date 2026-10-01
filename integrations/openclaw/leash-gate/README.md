@@ -19,7 +19,7 @@ Or by hand:
 
 ```bash
 leash agents register --name openclaw-agent          # writes ~/.leash/openclaw-agent.json
-openclaw plugins install --link ./integrations/openclaw/leash-gate --force
+openclaw plugins install --link ./integrations/openclaw/leash-gate --force --accept-capabilities
 openclaw plugins enable leash-gate
 openclaw plugins inspect leash-gate --runtime --json # should list the before_tool_call hook
 ```

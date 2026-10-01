@@ -138,6 +138,7 @@ Every `tools/call` is authorized. Resource-like arguments (`path`, `source`, `de
 [OpenClaw](https://github.com/openclaw/openclaw) can run shell commands, browse the web, and edit files. The [`leash-gate`](integrations/openclaw/leash-gate) plugin hooks OpenClaw's `before_tool_call` so **every** tool call is authorized by Leash, and denied calls are blocked with the policy's reason:
 
 ```bash
+npm install -g openclaw@latest              # once: requires Node.js 24.16+
 leash start                                  # terminal 1
 python3 integrations/openclaw/lab.py setup   # terminal 2: registers the agent, installs + enables the plugin, configures the gateway
 openclaw gateway run                         # terminal 2

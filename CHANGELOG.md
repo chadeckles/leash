@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-10-01
+
 ### Security
 - **Simple-format policies are expanded before the self-restriction check**, so a non-admin agent can't grant itself tools by submitting `tools: {exec: allow}` as a managed policy.
 - **Privilege escalation fixed**: any registered agent could create a managed policy granting itself `allow *`. `LEASH_POLICY_REQUIRE_ADMIN` now defaults to **on**. Non-admin agents may only create *self-restricting* policies (deny-only, enforce mode, scoped to their own `agent_id`), which keeps `LeashAgent.discover()` and MCP auto-discovery working.

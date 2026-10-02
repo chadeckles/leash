@@ -4,7 +4,7 @@
 
 You wouldn't let a dog roam the neighborhood unsupervised — so why let an AI agent read your files, send emails, and call APIs without guardrails? Leash is the authorization and audit layer that sits between your agent and the outside world. You write simple YAML rules that say what's allowed. Everything else is denied. Every decision is logged in a cryptographically signed, hash-chained audit trail that's tamper-evident by design.
 
-One `pip install`, one policy file, and your agent is on a leash.
+Leash is currently **beta**. Evaluate it in a controlled environment and validate policies against real agent behavior before production enforcement.
 
 ---
 
@@ -24,23 +24,26 @@ Your Agent ──▶ Leash ──▶ allow or deny
 - 🔍 **Scan before you deploy.** Discover an MCP server's tools, classify risk, and generate policies automatically.
 - 🪪 **Identity-bound.** Each agent has a JWT. It can only authorize its own actions.
 - 🔒 **Hardened by default.** Policy management and admin identities require the admin key; revoked tokens fail closed.
-- 🧩 **Framework-agnostic.** Python SDK, MCP proxy, OpenClaw plugin, or plain REST — works with any agent.
+- 🧩 **Framework-agnostic.** Python SDK, MCP proxy, or plain REST — works with any agent.
 
 ## Who It's For
 
 - **Developers** building AI agents that call tools (LangChain, CrewAI, custom code)
 - **Teams** deploying MCP servers with Claude Desktop, Cursor, or Windsurf
 - **Security engineers** who need governance over what agents can do
-- **Anyone running [OpenClaw](https://github.com/openclaw/openclaw)** who wants authorization and audit on top
+
+## Experimental Integrations
+
+- **[OpenClaw plugin](openclaw-guide.md)** — Technical preview of authorization through OpenClaw's `before_tool_call` hook. Validate tool names and policy behavior against your OpenClaw version before enforcement.
 
 ## Quick Links
 
 | I want to... | Go here |
 |---|---|
-| Get running in 60 seconds | [Getting Started](getting-started.md) |
+| Run the 60-second educational demo | [Getting Started](getting-started.md) |
 | Write rules for my agent | [Write Your First Policy](write-your-first-policy.md) |
-| Govern my OpenClaw assistant | [OpenClaw Integration](openclaw-guide.md) |
-| Run the 60-second demo or the OpenClaw lab | [OpenClaw Lab](openclaw-lab.md) |
+| Evaluate the experimental OpenClaw integration | [OpenClaw Integration](openclaw-guide.md) |
+| Run the OpenClaw technical-preview lab | [OpenClaw Lab](openclaw-lab.md) |
 | Secure my MCP tools in Claude/Cursor | [MCP Proxy Guide](mcp-proxy-guide.md) |
 | Use the Python SDK in my code | [SDK Reference](sdk-reference.md) |
 | Use the CLI | [CLI Reference](cli-reference.md) |

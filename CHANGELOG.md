@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-10-01
+
+### Changed
+- Updated the OpenClaw lab for the current gateway tool catalog and verified the `leash-gate` integration against OpenClaw 2026.9.7.
+- Labeled Leash as beta and the OpenClaw integration as a technical preview across the README and documentation.
+- Clarified that the 60-second walkthrough is an educational demo, while real deployments should follow the scan-first workflow and validate policies in observe mode before enforcement.
+- Reorganized the documentation navigation around Leash's framework-agnostic authorization, SDK, MCP proxy, and audit capabilities.
+
 ## [0.4.0] — 2026-10-01
 
 ### Security

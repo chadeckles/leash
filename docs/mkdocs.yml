@@ -20,13 +20,14 @@ theme:
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
-  - Write Your First Policy: write-your-first-policy.md
-  - OpenClaw Integration: openclaw-guide.md
-  - OpenClaw Lab: openclaw-lab.md
-  - MCP Proxy Guide: mcp-proxy-guide.md
-  - SDK Reference: sdk-reference.md
-  - CLI Reference: cli-reference.md
   - Architecture: architecture.md
+  - Write Your First Policy: write-your-first-policy.md
+  - SDK Reference: sdk-reference.md
+  - MCP Proxy Guide: mcp-proxy-guide.md
+  - CLI Reference: cli-reference.md
+  - Integrations:
+      - OpenClaw (Experimental): openclaw-guide.md
+      - OpenClaw Lab: openclaw-lab.md
 
 markdown_extensions:
   - admonition

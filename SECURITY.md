@@ -223,9 +223,11 @@ Before deploying Leash to any network-accessible environment:
 | **Keys directory** | `KEYS_DIR=/app/.keys` | Docker volume | Persists signing keys across restarts |
 | **Disable demo mode** | `LEASH_DEMO=false` | `false` (default) | No seed data endpoint |
 
-### Docker Compose (production-ready)
+### Single-Host Deployment (Docker Compose)
 
 The included `docker-compose.yml` ships with all hardening flags enabled:
+
+Leash core is beta. This Compose configuration applies the project's recommended hardening defaults, but operators must still validate policies and deployment controls for their environment.
 
 ```bash
 docker compose up -d

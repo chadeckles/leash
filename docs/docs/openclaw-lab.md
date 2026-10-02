@@ -1,9 +1,12 @@
 # OpenClaw Lab: Put an AI Agent on a Leash
 
+!!! warning "Technical preview"
+  Part B exercises an experimental integration with a pre-written policy. It demonstrates mechanics, not production readiness. Validate actual tool names and follow the [scan-first workflow](write-your-first-policy.md#the-scan-first-workflow) before enforcing a policy in your environment.
+
 Two parts, both copy-paste friendly:
 
 - **Part A: 60-second demo.** Python only, no OpenClaw. Shows 3 allows, 3 denies, the audit log, and tamper detection. **Start here.**
-- **Part B: real OpenClaw (optional, about 10 minutes).** The same authorization pattern, enforced inside a real OpenClaw gateway by the `leash-gate` plugin.
+- **Part B: OpenClaw technical preview (optional).** Exercise the same authorization pattern inside a real OpenClaw gateway with the experimental `leash-gate` plugin.
 
 Built for [Cyber Lab Night](https://lnkd.in/eteT72xp) — Colorado Springs, Oct 7.
 

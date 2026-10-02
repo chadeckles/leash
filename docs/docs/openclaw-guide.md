@@ -1,5 +1,8 @@
 # OpenClaw Integration Guide
 
+!!! warning "Technical preview"
+  The OpenClaw integration is experimental and under active development. Tool names and hook behavior may change between OpenClaw versions. [Scan your agent's actual tool use](write-your-first-policy.md#the-scan-first-workflow) and test policies in observe mode before enforcement.
+
 [OpenClaw](https://github.com/openclaw/openclaw) is a popular open-source personal AI assistant that can run shell commands, browse the web, read/write files, and coordinate multi-agent sessions across WhatsApp, Telegram, Slack, Discord, and more.
 
 That's a lot of power — and by default, OpenClaw has no external authorization layer. Leash adds one.
@@ -94,9 +97,11 @@ The agent ID and token are saved automatically. Leash policies match on the **ag
 !!! tip "Metadata flags are optional"
     `--vendor` and `--type` help with fleet filtering later but don't affect policy matching. Avoid `--type cli`, `admin`, or `ops` — those are admin types and require the admin key.
 
-### 3. Verify the built-in policy works
+### 3. Evaluate the built-in policy
 
 Leash ships with an OpenClaw policy at `app/policies/openclaw.yaml`. It applies to any agent with "openclaw" in its name, and it is just one `allow`/`deny` line per tool:
+
+The bundled policy is a starting point, not a validated policy for your environment. Before enforcement, confirm that its tool names match your OpenClaw version, that it covers every tool your agent actually calls, and that high-impact actions such as `exec` and `write` produce the intended decision. Use the [scan-first workflow](write-your-first-policy.md#the-scan-first-workflow) to collect that evidence.
 
 ```yaml
 agent: openclaw
@@ -109,7 +114,7 @@ tools:
 everything_else: deny   # tools not listed above
 ```
 
-To change what OpenClaw may do, flip a value and save — Leash reloads it automatically. Confirm it applied:
+For evaluation, change what OpenClaw may do by flipping a value and saving; Leash reloads it automatically. Confirm the resulting decision:
 
 ```bash
 leash policy test --agent openclaw-agent -a read -a exec

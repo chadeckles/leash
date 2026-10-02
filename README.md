@@ -4,6 +4,7 @@
 
 <p align="center">
   <a href="https://pypi.org/project/leash/"><img src="https://img.shields.io/pypi/v/leash?color=blue" alt="PyPI"></a>
+  <a href="https://pypi.org/project/leash/"><img src="https://img.shields.io/badge/status-beta-orange" alt="Beta status"></a>
   <a href="https://github.com/chadeckles/leash/actions/workflows/tests.yml"><img src="https://github.com/chadeckles/leash/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
   <a href="https://github.com/chadeckles/leash/actions/workflows/docker.yml"><img src="https://github.com/chadeckles/leash/actions/workflows/docker.yml/badge.svg" alt="Docker"></a>
   <a href="https://github.com/chadeckles/leash/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License"></a>
@@ -16,7 +17,7 @@
 
 You wouldn't let a dog roam the neighborhood unsupervised, so why let an AI agent read your files, send emails, and call APIs _without_ guardrails? Leash is an API-layer policy engine that sits between your agent and the outside world — no containers, no sidecars, just authorization. You write simple YAML rules that say what's allowed. Everything else is denied. Every decision from allow or deny activities is logged in a cryptographically signed, hash-chained audit trail that's tamper-evident by design.
 
-One `pip install`, one policy file, and your agent is on a leash.
+Leash is currently **beta**. Its authorization model is ready for evaluation and controlled deployments; validate policies against real agent behavior before enforcing them in production.
 
 ## 🌟 Highlights
 
@@ -26,8 +27,7 @@ One `pip install`, one policy file, and your agent is on a leash.
 - 👀 **Observe mode** — shadow new rules in production before enforcing
 - 🔍 **Security scanner** — discover an MCP server's tools, classify risk, generate policies
 - 🔒 **Hardened by default** — admin-only policy management, admin-key-gated admin agents, fail-closed revocation
-- 🧩 **Framework-agnostic** — Python SDK, MCP proxy, OpenClaw plugin, or plain REST
-- 🧠 **[OpenClaw ready](docs/docs/openclaw-guide.md)** — a `before_tool_call` plugin plus a built-in policy for the popular open-source AI assistant
+- 🧩 **Framework-agnostic** — Python SDK, MCP proxy, or plain REST
 - 🛡️ **OWASP mapped** — rules and audit checks reference [OWASP ASI](https://owasp.org/www-project-agentic-security-initiative/) and [LLM Top 10](https://owasp.org/www-project-top-10-for-large-language-model-applications/) threat IDs
 - ⚡ **Pure Python** — `pip install leash`. No Go, no Rust, no sidecar containers
 
@@ -55,7 +55,7 @@ Before your agent runs a tool, it asks Leash *"can I do this?"*:
 
 If Leash is unreachable, the SDK, MCP proxy, and OpenClaw plugin all **fail closed**.
 
-## ⬇️ Install and see it work (60 seconds)
+## ⬇️ Run the demo (60 seconds)
 
 ```bash
 git clone https://github.com/chadeckles/leash.git && cd leash
@@ -66,6 +66,8 @@ leash scan openclaw        # what can each OpenClaw tool do, and is it allowed?
 ```
 
 `leash demo` needs no server, config, or API keys. It starts a throwaway Leash in a temp directory, sends six real tool calls from an "OpenClaw" agent, shows each decision and reason, prints the hash-chained audit log, then edits one entry and shows the chain verification catch it. Add `--step` to pause between parts (great for presenting) or `--keep` to leave it running and open the dashboard.
+
+This is an educational demo, not a production deployment workflow. For a real agent, register it, observe its actual actions, scan the audit data, write and test policies in observe mode, and only then enable enforcement. See [Write Your First Policy](docs/docs/write-your-first-policy.md#the-scan-first-workflow).
 
 Then change `exec: deny` to `exec: allow` in [`app/policies/openclaw.yaml`](app/policies/openclaw.yaml) and run `leash demo` again — the shell command is now allowed and `leash scan openclaw` flags it as *high risk and allowed*. Change it back when you're done.
 
@@ -133,20 +135,9 @@ python -m sdk.mcp_proxy \
 
 Every `tools/call` is authorized. Resource-like arguments (`path`, `source`, `destination`, `paths[]`, …) are each checked against `resource:` rules, scalar arguments are available to conditions as `arg.<name>`, and tools whose description or schema changes mid-session are blocked (tool-poisoning defense). See the [MCP Proxy Guide](docs/docs/mcp-proxy-guide.md).
 
-### OpenClaw
+### OpenClaw (Technical Preview)
 
-[OpenClaw](https://github.com/openclaw/openclaw) can run shell commands, browse the web, and edit files. The [`leash-gate`](integrations/openclaw/leash-gate) plugin hooks OpenClaw's `before_tool_call` so **every** tool call is authorized by Leash, and denied calls are blocked with the policy's reason:
-
-```bash
-npm install -g openclaw@latest              # once: requires Node.js 24.16+
-leash start                                  # terminal 1
-python3 integrations/openclaw/lab.py setup   # terminal 2: registers the agent, installs + enables the plugin, configures the gateway
-openclaw gateway run                         # terminal 2
-python3 integrations/openclaw/lab.py allow   # terminal 3: 3 allowed tool calls
-python3 integrations/openclaw/lab.py deny    # terminal 3: 3 blocked tool calls
-```
-
-The built-in [`openclaw.yaml`](app/policies/openclaw.yaml) policy is a list of `tool: allow|deny` toggles: it allows reads, web search, and memory, and denies `exec`, `write`, `browser`, and other high-risk tools. Run `leash scan openclaw` to see every tool, its risk, and its current decision. See the [OpenClaw Integration Guide](docs/docs/openclaw-guide.md) or the hands-on **[OpenClaw Lab](docs/docs/openclaw-lab.md)**.
+The experimental [`leash-gate`](integrations/openclaw/leash-gate) plugin hooks OpenClaw's `before_tool_call` to authorize tool calls through Leash. Tool names and behavior may vary between OpenClaw versions, so validate the integration and policy against your installation before enforcement. See the [OpenClaw Integration Guide](docs/docs/openclaw-guide.md) and hands-on [OpenClaw Lab](docs/docs/openclaw-lab.md).
 
 ### REST API
 

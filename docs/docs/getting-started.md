@@ -1,13 +1,16 @@
 # Getting Started
 
-Get Leash running and see it make allow/deny decisions in under 2 minutes.
+Run an educational demo of Leash's allow/deny decisions in under 2 minutes.
+
+!!! warning "Demo vs. deployment"
+  The 60-second demo explains the authorization model; it is not a production setup. For a real agent, register it, observe actual actions, scan the audit data, write and test policies in observe mode, and only then enable enforcement. Follow the [scan-first workflow](write-your-first-policy.md#the-scan-first-workflow).
 
 ## Prerequisites
 
 - Python 3.11+ (macOS ships with 3.9 — run `brew install python@3.12` first if needed)
 - pip
 
-## Option 1: See it work in 60 seconds (Recommended)
+## Option 1: Run the educational demo (60 seconds)
 
 ```bash
 git clone https://github.com/chadeckles/leash.git
